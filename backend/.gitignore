@@ -1,0 +1,6 @@
+# Ignore local storage
+storage/
+__pycache__/
+*.pyc
+venv/
+.env

@@ -2,19 +2,17 @@ import React from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Home, List, BarChart2, FileText, Box } from 'lucide-react';
 import { cn } from '@/lib/utils';
-
 export function Sidebar() {
   const location = useLocation();
   const navigate = useNavigate();
-  
+
   const navItems = [
     { icon: Home, label: '工作台', path: '/dashboard' },
     { icon: List, label: '任务管理', path: '/tasks' },
-    { icon: BarChart2, label: '结果中心', path: '/results' },
+    { icon: BarChart2, label: '结果报表', path: '/results' },
     { icon: FileText, label: '提示词配置', path: '/prompts' },
     { icon: Box, label: '模型管理', path: '/models' },
   ];
-
   return (
     <div className="w-64 bg-card border-r border-border h-screen flex flex-col justify-between shrink-0 sticky top-0 overflow-y-auto">
       <div>
@@ -43,7 +41,7 @@ export function Sidebar() {
           })}
         </div>
       </div>
-      
+
       <div className="p-4 border-t border-border flex items-center gap-3 cursor-pointer hover:bg-muted transition-colors m-4 rounded-lg">
         <div className="h-10 w-10 rounded-full bg-blue-500 overflow-hidden">
           <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=Felix" alt="avatar" />

@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install *)",
+      "Bash(npx vite *)",
+      "Bash(uv run *)",
+      "Bash(npm run *)",
+      "Bash(pip list *)",
+      "PowerShell(D:\\\\WorkSpace\\\\EnvMatch\\\\backend\\\\venv\\\\Scripts\\\\python.exe -m uvicorn main:app --reload --port 8000)",
+      "Bash(Get-Process -Name \"python\",\"node\",\"uvicorn\" -ErrorAction SilentlyContinue)",
+      "Bash(Select-Object Id, ProcessName, StartTime)",
+      "Bash(Format-Table)",
+      "PowerShell(Get-Process *)",
+      "PowerShell(Stop-Process *)",
+      "Bash(uvicorn main:app --reload --port 8000)",
+      "Bash(npx tsc *)"
+    ]
+  }
+}

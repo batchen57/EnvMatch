@@ -1,12 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import ReactECharts from 'echarts-for-react';
-
 export function Overview() {
   const [stats, setStats] = useState({
-    total: 128, completed: 96, avg_similarity: 68.7, high_similarity_alerts: 12,
-    distribution: { high: 32, medium: 64, low: 32 }
+    total: 0, completed: 0, avg_similarity: 0, high_similarity_alerts: 0,
+    distribution: { high: 0, medium: 0, low: 0 },
+    trend: { dates: [], counts: [], similarities: [] }
   });
-
   useEffect(() => {
     fetch('http://localhost:8000/dashboard-stats')
       .then(r => r.json())
@@ -18,21 +17,38 @@ export function Overview() {
       })
       .catch(e => console.error("Stats fetch error:", e));
   }, []);
-
   const lineOption = {
     tooltip: { trigger: 'axis' },
     grid: { left: '3%', right: '4%', bottom: '3%', containLabel: true },
-    xAxis: { type: 'category', boundaryGap: false, data: ['05-08', '05-09', '05-10', '05-11', '05-12', '05-13', '05-14'], axisLine: { lineStyle: { color: '#334155' } } },
+    xAxis: {
+      type: 'category',
+      boundaryGap: false,
+      data: stats.trend?.dates || ['-', '-', '-', '-', '-', '-', '-'],
+      axisLine: { lineStyle: { color: '#334155' } }
+    },
     yAxis: [
       { type: 'value', axisLine: { show: false }, splitLine: { lineStyle: { color: '#1e293b' } } },
       { type: 'value', axisLine: { show: false }, splitLine: { show: false } }
     ],
     series: [
-      { name: '任务数', type: 'line', smooth: true, data: [60, 40, 50, 110, 80, 120, 130], itemStyle: { color: '#3b82f6' }, areaStyle: { color: 'rgba(59, 130, 246, 0.1)' } },
-      { name: '平均相似度', type: 'line', smooth: true, yAxisIndex: 1, data: [60, 50, 65, 55, 60, 85, 90], itemStyle: { color: '#10b981' } }
+      {
+        name: '任务数',
+        type: 'line',
+        smooth: true,
+        data: stats.trend?.counts || [0, 0, 0, 0, 0, 0, 0],
+        itemStyle: { color: '#3b82f6' },
+        areaStyle: { color: 'rgba(59, 130, 246, 0.1)' }
+      },
+      {
+        name: '平均相似度',
+        type: 'line',
+        smooth: true,
+        yAxisIndex: 1,
+        data: stats.trend?.similarities || [0, 0, 0, 0, 0, 0, 0],
+        itemStyle: { color: '#10b981' }
+      }
     ]
   };
-
   const pieOption = {
     tooltip: { trigger: 'item' },
     series: [
@@ -50,14 +66,12 @@ export function Overview() {
       }
     ]
   };
-
   return (
     <div className="bg-card rounded-xl p-6 border border-border h-auto">
       <div className="flex justify-between items-center mb-6">
         <h3 className="text-lg font-medium">今日概览</h3>
-        <span className="text-sm text-primary cursor-pointer">更多数据 →</span>
       </div>
-      
+
       <div className="grid grid-cols-4 gap-4 mb-8">
         <div className="bg-muted/30 p-4 rounded-lg">
           <div className="text-sm text-muted-foreground mb-2">任务总数</div>
@@ -74,9 +88,9 @@ export function Overview() {
         <div className="bg-muted/30 p-4 rounded-lg border border-red-500/30">
           <div className="text-sm text-muted-foreground mb-2">高相似度预警</div>
           <div className="text-3xl font-bold flex items-end gap-2 text-red-500">{stats.high_similarity_alerts}</div>
+          <div className="text-3xl font-bold flex items-end gap-2 text-red-500">{stats.distribution.high}</div>
         </div>
       </div>
-
       <div className="grid grid-cols-2 gap-6">
         <div>
           <div className="flex gap-4 mb-2 text-sm text-muted-foreground">
@@ -102,17 +116,17 @@ export function Overview() {
               <div className="flex items-center gap-2 text-sm">
                 <div className="w-3 h-3 rounded-full bg-red-500"></div>
                 <div className="flex-1">高相似度 (70-100%)</div>
-                <div className="text-muted-foreground">{stats.distribution.high} ({stats.total ? Math.round(stats.distribution.high/stats.total*100) : 0}%)</div>
+                <div className="text-muted-foreground">{stats.distribution.high} ({stats.total ? Math.round(stats.distribution.high / stats.total * 100) : 0}%)</div>
               </div>
               <div className="flex items-center gap-2 text-sm">
                 <div className="w-3 h-3 rounded-full bg-amber-500"></div>
                 <div className="flex-1">中相似度 (40-70%)</div>
-                <div className="text-muted-foreground">{stats.distribution.medium} ({stats.total ? Math.round(stats.distribution.medium/stats.total*100) : 0}%)</div>
+                <div className="text-muted-foreground">{stats.distribution.medium} ({stats.total ? Math.round(stats.distribution.medium / stats.total * 100) : 0}%)</div>
               </div>
               <div className="flex items-center gap-2 text-sm">
                 <div className="w-3 h-3 rounded-full bg-emerald-500"></div>
                 <div className="flex-1">低相似度 (0-40%)</div>
-                <div className="text-muted-foreground">{stats.distribution.low} ({stats.total ? Math.round(stats.distribution.low/stats.total*100) : 0}%)</div>
+                <div className="text-muted-foreground">{stats.distribution.low} ({stats.total ? Math.round(stats.distribution.low / stats.total * 100) : 0}%)</div>
               </div>
             </div>
           </div>

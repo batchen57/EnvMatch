@@ -2,13 +2,13 @@ import React from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { Sidebar } from './components/Sidebar';
 import { Pipeline } from './components/Pipeline';
-import { Overview } from './components/Overview';
 import { TaskList } from './components/TaskList';
 import { ResultDetails } from './components/ResultDetails';
+import { Overview } from './components/Overview';
+import { ResultReport } from './components/ResultReport';
 import { PromptConfig } from './components/PromptConfig';
 import { ModelConfig } from './components/ModelConfig';
 import { Bell, HelpCircle } from 'lucide-react';
-
 function Dashboard() {
   return (
     <div className="flex flex-col gap-6">
@@ -17,12 +17,11 @@ function Dashboard() {
     </div>
   );
 }
-
 function App() {
   return (
     <div className="flex h-screen bg-background text-foreground font-sans overflow-hidden">
       <Sidebar />
-      
+
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         <header className="h-16 shrink-0 flex items-center justify-between px-8 border-b border-border bg-card/50 backdrop-blur">
           <div className="flex flex-col">
@@ -44,12 +43,12 @@ function App() {
             </div>
           </div>
         </header>
-
         <main className="flex-1 p-6 overflow-y-auto custom-scrollbar">
           <Routes>
             <Route path="/" element={<Navigate to="/dashboard" replace />} />
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/tasks" element={<TaskList />} />
+            <Route path="/results" element={<ResultReport />} />
             <Route path="/tasks/:id" element={<ResultDetails />} />
             <Route path="/prompts" element={<PromptConfig />} />
             <Route path="/models" element={<ModelConfig />} />
@@ -60,5 +59,4 @@ function App() {
     </div>
   );
 }
-
 export default App;

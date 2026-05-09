@@ -86,9 +86,8 @@ def get_task(task_id: str, db: Session = Depends(get_db)):
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     
-    result = None
-    if task.status == models.TaskStatus.COMPLETED:
-        result = db.query(models.TaskResult).filter(models.TaskResult.task_id == task_id).first()
+    # Always try to fetch result if it exists (could contain error info or partial results)
+    result = db.query(models.TaskResult).filter(models.TaskResult.task_id == task_id).first()
         
     return {"task": task, "result": result}
 @app.delete("/tasks/{task_id}")

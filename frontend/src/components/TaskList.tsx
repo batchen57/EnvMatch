@@ -164,10 +164,8 @@ export function TaskList() {
                         onClick={() => navigate(`/tasks/${task.id}`)}
                         className={cn(
                           "flex items-center gap-1 cursor-pointer transition-colors font-medium",
-                          task.status === 'COMPLETED' ? "text-primary hover:text-primary/80" : "text-muted-foreground cursor-not-allowed opacity-50"
-                            (task.status === 'COMPLETED' || task.status === 'FAILED') ? "text-primary hover:text-primary/80" : "text-muted-foreground cursor-not-allowed opacity-50"
+                          (task.status === 'COMPLETED' || task.status === 'FAILED') ? "text-primary hover:text-primary/80" : "text-muted-foreground cursor-not-allowed opacity-50"
                         )}
-                        disabled={task.status !== 'COMPLETED'}
                         disabled={task.status !== 'COMPLETED' && task.status !== 'FAILED'}
                       >
                         <Eye className="w-4 h-4" />

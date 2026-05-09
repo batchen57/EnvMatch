@@ -9,3 +9,5 @@ pydantic-settings
 scenedetect
 opencv-python
 numpy
+openai
+requests

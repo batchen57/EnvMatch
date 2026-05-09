@@ -22,12 +22,13 @@ def get_video_metadata(video_path: str) -> Dict:
         return {"duration": duration, "resolution": f"{vs['width']}x{vs['height']}", "size_mb": round(os.path.getsize(video_path)/1024/1024, 2), "fps": eval(vs['avg_frame_rate']) if '/' in vs['avg_frame_rate'] else float(vs['avg_frame_rate'])}
     except: return {"duration": 0, "resolution": "unknown", "size_mb": 0, "fps": 0}
 
-def analyze_with_minimax_vlm(frames_a, frames_b, prompt, api_key, base_url):
-    vlm_url = "https://api.minimaxi.com/v1/coding_plan/vlm"
-    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-    
+def analyze_with_vlm(frames_a: List[str], frames_b: List[str], prompt: str, api_key: str, base_url: str, model_id: str, provider: str = None):
+    """
+    通用 VLM 分析接口，支持 MiniMax 专用端点和标准 OpenAI 兼容格式
+    """
+    print(f"DEBUG: Starting VLM analysis with model {model_id} at {base_url}")
     def create_comparison_grid(fa, fb):
-        def to_abs(p): return os.path.abspath(p)
+        def to_abs(p): return os.path.abspath(os.path.join(os.path.dirname(__file__), "..", p))
         imgs_a = [cv2.imread(to_abs(f)) for f in fa[:4] if os.path.exists(to_abs(f))]
         imgs_b = [cv2.imread(to_abs(f)) for f in fb[:4] if os.path.exists(to_abs(f))]
         imgs_a = [i for i in imgs_a if i is not None]
@@ -42,26 +43,146 @@ def analyze_with_minimax_vlm(frames_a, frames_b, prompt, api_key, base_url):
         return base64.b64encode(buf).decode('utf-8')
 
     b64_grid = create_comparison_grid(frames_a, frames_b)
-    if not b64_grid: raise Exception("Grid Error")
+    if not b64_grid: raise Exception("无法生成对比图，请检查视频帧提取是否成功")
 
-    # 强化 Prompt，强制要求标准维度名
     vlm_prompt = f"""{prompt}
     请严格对比视频A（上行）与视频B（下行）的环境相似度。
-    必须返回包含以下 5 个维度的 JSON 评分：
-    lighting_weather (光照天气), architecture (建筑风格), facilities (固定设施), vegetation (植被绿化), road_surface (地面材质)。
+    必须返回包含以下格式的 JSON 评分，不要包含任何其他文字：
+    {{
+      "similarity_score": 85,
+      "dimension_scores": {{
+        "lighting_weather": 80,
+        "architecture": 90,
+        "facilities": 70,
+        "vegetation": 85,
+        "road_surface": 100
+      }},
+      "similar_points": ["点1", "点2"],
+      "difference_points": ["点1"],
+      "summary": "综合分析结论..."
+    }}
     """
     
-    payload = {"prompt": vlm_prompt, "image_url": f"data:image/jpeg;base64,{b64_grid}"}
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    
+    # 自动识别端点类型并处理 URL
+    is_native_vlm = "/coding_plan/vlm" in base_url
+    
+    request_url = base_url
+    if not is_native_vlm:
+        # 如果是 OpenAI 兼容模式，确保 URL 以 /chat/completions 结尾
+        if not request_url.endswith("/chat/completions"):
+            request_url = request_url.rstrip("/") + "/chat/completions"
+    
+    if is_native_vlm:
+        payload = {"prompt": vlm_prompt, "image_url": f"data:image/jpeg;base64,{b64_grid}"}
+    else:
+        # 标准 OpenAI 兼容格式
+        payload = {
+            "model": model_id,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": vlm_prompt},
+                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64_grid}"}}
+                    ]
+                }
+            ],
+            "temperature": 0.1,
+            "max_tokens": 1024
+        }
+        
+        # MiniMax 特殊处理: 某些版本在 /chat/completions 下也需要 top-level images 字段，或者不支持 content 列表格式
+        if provider == "MiniMax" or "minimax" in model_id.lower():
+            # 尝试使用 MiniMax 推荐的混合格式：content 为字符串 + images 数组
+            payload["messages"][0] = {
+                "role": "user",
+                "content": vlm_prompt,
+                "images": [b64_grid]
+            }
 
     try:
-        response = requests.post(vlm_url, headers=headers, json=payload, timeout=180)
-        rj = response.json(); ans = rj.get('content', '').strip()
-        text = ans
-        if "```json" in text: text = text.split("```json")[1].split("```")[0].strip()
-        elif "```" in text: text = text.split("```")[1].split("```")[0].strip()
+        response = requests.post(request_url, headers=headers, json=payload, timeout=120)
         
-        raw_res = json.loads(text)
-        # 强制格式化输出，确保 5 个维度一个不落
+        # 记录调试信息
+        print(f"VLM Request URL: {request_url}")
+        print(f"VLM Response Status: {response.status_code}")
+        
+        if response.status_code != 200:
+            raise Exception(f"API 返回错误: {response.status_code} - {response.text}")
+            
+        if not response.text.strip():
+            raise Exception(f"API 返回了空响应 (Status: {response.status_code})")
+            
+        try:
+            rj = response.json()
+        except Exception as e:
+            raise Exception(f"解析 API 响应失败: {str(e)}。状态码: {response.status_code}, 内容预览: {response.text[:200]}...")
+            
+        # 处理不同格式的响应
+        if is_native_vlm:
+            # 优先尝试 root-level content (MiniMax Native VLM)
+            ans = rj.get('content')
+            if not ans:
+                # 备选：尝试 choices (有些版本可能返回这个)
+                choices = rj.get('choices', [])
+                if choices:
+                    ans = choices[0].get('message', {}).get('content', '')
+                else:
+                    # 再次备选：如果是 dict 且包含 output/results 等
+                    ans = rj.get('output', {}).get('text', '') or rj.get('result', '')
+            ans = str(ans or '').strip()
+        else:
+            choices = rj.get('choices', [])
+            if not choices:
+                # 检查是否有错误信息在响应中
+                if 'error' in rj:
+                    raise Exception(f"API 返回业务错误: {rj['error']}")
+                raise Exception(f"API 返回格式异常: {rj}")
+            ans = choices[0].get('message', {}).get('content', '').strip()
+            
+        if not ans: raise Exception("API 返回内容为空")
+        
+        # 记录原始返回以便调试
+        print(f"AI Response Content: {ans[:200]}...")
+        
+        # 解析 JSON
+        text = ans
+        if "```json" in text: 
+            try:
+                text = text.split("```json")[1].split("```")[0].strip()
+            except IndexError:
+                pass
+        elif "```" in text: 
+            try:
+                text = text.split("```")[1].split("```")[0].strip()
+            except IndexError:
+                pass
+        else:
+            # 如果没有代码块标记，尝试寻找第一个 { 和最后一个 }
+            import re
+            match = re.search(r'\{.*\}', text, re.DOTALL)
+            if match:
+                text = match.group(0)
+        
+        if not text:
+            raise Exception(f"AI 返回的内容中未找到有效的 JSON 数据块。原始回复: {ans[:200]}...")
+            
+        try:
+            # 预处理：移除一些可能导致解析失败的非标准字符
+            clean_text = text.strip()
+            raw_res = json.loads(clean_text)
+        except Exception as e:
+            # 尝试修复一些常见的 JSON 错误（如多余逗号）
+            import re
+            fixed_text = re.sub(r',\s*([\]}])', r'\1', text)
+            try:
+                raw_res = json.loads(fixed_text)
+            except Exception as e2:
+                raise Exception(f"解析 AI 返回的 JSON 失败: {str(e2)}。待解析文本: {text[:200]}...")
+
+        # 归一化维度评分
         d = raw_res.get("dimension_scores", {})
         mapped = {
             "lighting_weather": d.get("lighting_weather", d.get("光照天气", 0)),
@@ -72,8 +193,14 @@ def analyze_with_minimax_vlm(frames_a, frames_b, prompt, api_key, base_url):
         }
         raw_res["dimension_scores"] = mapped
         return raw_res
-    except:
-        return {"similarity_score": 0, "summary": ans if 'ans' in locals() else "Error", "dimension_scores": {"lighting_weather":0,"architecture":0,"facilities":0,"vegetation":0,"road_surface":0}}
+    except Exception as e:
+        print(f"VLM Analysis Error: {str(e)}")
+        return {
+            "similarity_score": 0, 
+            "summary": f"分析失败: {str(e)}", 
+            "dimension_scores": {"lighting_weather":0,"architecture":0,"facilities":0,"vegetation":0,"road_surface":0},
+            "error": str(e)
+        }
 
 def extract_frames(video_path: str, task_id: str, suffix: str, fps: int = 1, resolution: int = 720, denoise: bool = False, sampling_type: str = "fixed"):
     od = os.path.join("storage", f"{task_id}_{suffix}_frames"); os.makedirs(od, exist_ok=True)
@@ -167,23 +294,41 @@ def process_video_task(task_id: str):
         db.commit()
 
         try:
-            air = analyze_with_minimax_vlm(fa, fb, t.prompt, key, url)
-            t.status = models.TaskStatus.COMPLETED; t.similarity_score = air.get("similarity_score", 0)
-            t.input_tokens = 500 # 估算值，因为 VLM 接口没返回
-            t.output_tokens = len(str(air)) // 2
+            provider = cfg.provider if cfg else "Unknown"
+            air = analyze_with_vlm(fa, fb, t.prompt, key, url, t.model_id, provider)
+            
+            # 即使分析结果包含 error，也尝试更新部分数据
+            t.similarity_score = air.get("similarity_score", 0)
+            usage = air.get("usage") or {}
+            t.input_tokens = usage.get("prompt_tokens", 500)
+            t.output_tokens = usage.get("completion_tokens", len(str(air)) // 2)
+            
             tr = db.query(models.TaskResult).filter(models.TaskResult.task_id == task_id).first()
             if tr:
-                tr.dimension_scores, tr.similar_points, tr.difference_points, tr.summary = air.get("dimension_scores", {}), air.get("similar_points", []), air.get("difference_points", []), air.get("summary", "")
+                tr.dimension_scores = air.get("dimension_scores", {})
+                tr.similar_points = air.get("similar_points", [])
+                tr.difference_points = air.get("difference_points", [])
+                tr.summary = air.get("summary", "")
+                if air.get("error"):
+                    tr.error_message = air.get("error")
+                    t.status = models.TaskStatus.FAILED
+                else:
+                    t.status = models.TaskStatus.COMPLETED
             db.commit()
-        except Exception as e: raise e
+        except Exception as e:
+            print(f"Workflow Exception: {str(e)}")
+            raise e
     except Exception as e:
-        db.rollback()
+        # 这里不再使用 db.rollback()，因为我们希望保留之前成功 commit 的部分（如关键帧）
         try:
             t = db.query(models.Task).filter(models.Task.id == task_id).first()
             if t:
                 t.status = models.TaskStatus.FAILED
                 tr = db.query(models.TaskResult).filter(models.TaskResult.task_id == task_id).first()
-                if tr: tr.error_message, tr.summary = str(e), f"分析失败: {str(e)}"
+                if tr: 
+                    tr.error_message = str(e)
+                    tr.summary = f"分析过程中止: {str(e)}"
                 db.commit()
-        except: pass
+        except Exception as db_e:
+            print(f"Failed to save error status: {db_e}")
     finally: db.close()

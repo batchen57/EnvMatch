@@ -54,6 +54,13 @@ async def create_task(
     from services.task_processor import get_video_metadata
     meta_a = get_video_metadata(video_a_path)
     meta_b = get_video_metadata(video_b_path)
+
+    try:
+        p_opts = json.loads(preprocess_options) if preprocess_options else None
+    except Exception as je:
+        print(f"Error parsing preprocess_options: {je}, value: {preprocess_options}")
+        p_opts = None
+
     # Create DB record
     db_task = models.Task(
         id=task_id,
@@ -69,7 +76,7 @@ async def create_task(
         video_b_resolution=meta_b["resolution"],
         video_a_size=meta_a["size_mb"],
         video_b_size=meta_b["size_mb"],
-        preprocess_options=json.loads(preprocess_options) if preprocess_options else None
+        preprocess_options=p_opts
     )
     db.add(db_task)
     db.commit()
@@ -341,7 +348,7 @@ def list_models(db: Session = Depends(get_db)):
             {"name": "Gemini 2.5 Pro", "identifier": "gemini-2.5-pro", "provider": "Google", "api_key": "", "base_url": "", "description": "多模态理解能力强, 适用于复杂场景和环境细节分析，精准扣分。", "capabilities": ["text", "image", "video"], "is_default": "true"},
             {"name": "GPT-4o", "identifier": "gpt-4o", "provider": "OpenAI", "api_key": "", "base_url": "https://api.openai.com/v1", "description": "通用性强, 稳定可靠", "capabilities": ["text", "image", "video"], "is_default": "false"},
             {"name": "MiniMax 2.7", "identifier": "minimax-2.7", "provider": "MiniMax", "api_key": "", "base_url": "https://api.minimax.chat/v1", "description": "国产优秀大模型", "capabilities": ["text", "image"], "is_default": "false"},
-            {"name": "MiniMax 2.7", "identifier": "MiniMax-M2.7", "provider": "MiniMax", "api_key": "", "base_url": "https://api.minimaxi.com/v1", "description": "国产优秀大模型，支持超长上下文和多轮对话。", "capabilities": ["text", "image"], "is_default": "false"},
+            {"name": "MiniMax 2.7", "identifier": "MiniMax-M2.7", "provider": "MiniMax", "api_key": "", "base_url": "https://api.minimaxi.com/v1/coding_plan/vlm", "description": "国产优秀大模型，视觉理解能力强，需使用专用 VLM 端点。", "capabilities": ["text", "image"], "is_default": "false"},
             {"name": "Qwen3-VL-Plus", "identifier": "qwen-vl-plus", "provider": "Alibaba", "api_key": "", "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1", "description": "视觉理解能力极强", "capabilities": ["text", "image", "video"], "is_default": "false"}
         ]
         for m in defaults:

@@ -11,7 +11,7 @@ export function PromptConfig() {
 
   const fetchPrompts = async () => {
     try {
-      const res = await fetch("http://localhost:8000/prompt-templates/");
+      const res = await fetch("http://localhost:8888/prompt-templates/");
       if (res.ok) {
         setPrompts(await res.json());
       }
@@ -31,8 +31,8 @@ export function PromptConfig() {
 
     try {
       const url = editingId === 'new' 
-        ? "http://localhost:8000/prompt-templates/" 
-        : `http://localhost:8000/prompt-templates/${editingId}`;
+        ? "http://localhost:8888/prompt-templates/" 
+        : `http://localhost:8888/prompt-templates/${editingId}`;
       const method = editingId === 'new' ? "POST" : "PUT";
 
       const response = await fetch(url, {
@@ -53,7 +53,7 @@ export function PromptConfig() {
   const handleDelete = async (id: string) => {
     if (!confirm('确认删除该提示词模版？删除后不可恢复。')) return;
     try {
-      await fetch(`http://localhost:8000/prompt-templates/${id}`, { method: "DELETE" });
+      await fetch(`http://localhost:8888/prompt-templates/${id}`, { method: "DELETE" });
       fetchPrompts();
     } catch (e) {
       console.error(e);

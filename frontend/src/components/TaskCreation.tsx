@@ -28,12 +28,12 @@ export function TaskCreation({ onClose, onTaskCreated }: { onClose: () => void, 
   const [selectedModelId, setSelectedModelId] = useState<string>("");
 
   useEffect(() => {
-    fetch("http://localhost:8000/prompt-templates/")
+    fetch("http://localhost:8888/prompt-templates/")
       .then(r => r.json())
       .then(data => setPrompts(data))
       .catch(e => console.error(e));
 
-    fetch("http://localhost:8000/models/")
+    fetch("http://localhost:8888/models/")
       .then(r => r.json())
       .then(data => {
         setModels(data);
@@ -100,7 +100,7 @@ export function TaskCreation({ onClose, onTaskCreated }: { onClose: () => void, 
     formData.append("preprocess_options", JSON.stringify(preprocessOptions));
 
     try {
-      const res = await fetch("http://localhost:8000/tasks/", {
+      const res = await fetch("http://localhost:8888/tasks/", {
         method: "POST",
         body: formData,
       });

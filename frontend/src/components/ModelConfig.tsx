@@ -121,7 +121,7 @@ export function ModelConfig() {
 
   const fetchModels = async () => {
     try {
-      const res = await fetch("http://localhost:8000/models/");
+      const res = await fetch("http://localhost:8888/models/");
       if (res.ok) {
         const data = await res.json();
         setModels(data);
@@ -168,7 +168,7 @@ export function ModelConfig() {
       
       // Update order in background
       for (let i = 0; i < newItems.length; i++) {
-        fetch(`http://localhost:8000/models/${newItems[i].id}`, {
+        fetch(`http://localhost:8888/models/${newItems[i].id}`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ ...newItems[i], sort_order: (i + 1) * 10 })
@@ -179,7 +179,7 @@ export function ModelConfig() {
 
   const handleSave = async () => {
     try {
-      const url = editingId === 'new' ? "http://localhost:8000/models/" : `http://localhost:8000/models/${editingId}`;
+      const url = editingId === 'new' ? "http://localhost:8888/models/" : `http://localhost:8888/models/${editingId}`;
       const method = editingId === 'new' ? "POST" : "PUT";
       
       const response = await fetch(url, {
@@ -203,7 +203,7 @@ export function ModelConfig() {
   const handleDelete = async (id: string) => {
     if (!confirm('确认删除该模型？')) return;
     try {
-      await fetch(`http://localhost:8000/models/${id}`, { method: "DELETE" });
+      await fetch(`http://localhost:8888/models/${id}`, { method: "DELETE" });
       fetchModels();
     } catch (e) {
       console.error(e);

@@ -7,7 +7,7 @@ export function Overview() {
     trend: { dates: [], counts: [], similarities: [] }
   });
   useEffect(() => {
-    fetch('http://localhost:8000/dashboard-stats')
+    fetch('http://localhost:8888/dashboard-stats')
       .then(r => r.json())
       .then(d => {
         // Only set if we get valid data

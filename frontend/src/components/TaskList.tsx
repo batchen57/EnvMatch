@@ -17,7 +17,7 @@ export function TaskList() {
   const fetchTasks = async () => {
     try {
       const skip = (page - 1) * pageSize;
-      const res = await fetch(`http://localhost:8000/tasks/?status=${statusFilter}&skip=${skip}&limit=${pageSize}`);
+      const res = await fetch(`http://localhost:8888/tasks/?status=${statusFilter}&skip=${skip}&limit=${pageSize}`);
       if (res.ok) {
         const data = await res.json();
         setTasks(data.tasks || []);
@@ -37,7 +37,7 @@ export function TaskList() {
   const handleDelete = async (id: string) => {
     if (!window.confirm("确定要删除该任务吗？删除后文件将无法找回。")) return;
     try {
-      const res = await fetch(`http://localhost:8000/tasks/${id}`, { method: 'DELETE' });
+      const res = await fetch(`http://localhost:8888/tasks/${id}`, { method: 'DELETE' });
       if (res.ok) {
         fetchTasks();
       }

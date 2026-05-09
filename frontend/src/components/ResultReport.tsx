@@ -20,7 +20,7 @@ export function ResultReport() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch('http://localhost:8000/dashboard-stats')
+    fetch('http://localhost:8888/dashboard-stats')
       .then(r => r.json())
       .then(d => {
         if (d && typeof d.total !== 'undefined') {

@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import ReactECharts from 'echarts-for-react';
-import { Download, Play, ArrowLeft, Video, Scan, Loader2, X, AlertCircle, Clock, Zap, FileText, Hash, Calendar, Layers } from 'lucide-react';
+import { Download, Play, ArrowLeft, Video, Scan, Loader2, X, AlertCircle, Clock, Zap, FileText, Hash, Calendar, Layers, Minus, Plus, RotateCcw } from 'lucide-react';
 import { domToPng } from 'modern-screenshot';
 import { jsPDF } from 'jspdf';
 import { cn } from '@/lib/utils';
+import { motion, AnimatePresence } from 'framer-motion';
 
 export function ResultDetails() {
   const navigate = useNavigate();
@@ -13,11 +14,25 @@ export function ResultDetails() {
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
   const [selectedImg, setSelectedImg] = useState<string | null>(null);
+  const [zoom, setZoom] = useState(100);
+  const [pos, setPos] = useState({ x: 0, y: 0 });
   const reportRef = React.useRef<HTMLDivElement>(null);
+  const previewRef = React.useRef<HTMLDivElement>(null);
+
+  const toggleFullScreen = () => {
+    if (!previewRef.current) return;
+    if (!document.fullscreenElement) {
+      previewRef.current.requestFullscreen().catch(err => {
+        console.error(`Error attempting to enable full-screen mode: ${err.message}`);
+      });
+    } else {
+      document.exitFullscreen();
+    }
+  };
 
   useEffect(() => {
     if (!id) return;
-    fetch(`http://localhost:8000/tasks/${id}`)
+    fetch(`http://localhost:8888/tasks/${id}`)
       .then(r => r.json())
       .then(d => {
         setData(d);
@@ -172,10 +187,10 @@ export function ResultDetails() {
              <h4 className="text-sm font-medium mb-4">视频对比（关键帧对齐）</h4>
              <div className="flex gap-4">
                <div className="flex-1 bg-black aspect-video rounded-lg overflow-hidden border border-border/50">
-                 <video className="w-full h-full object-contain" controls src={`http://localhost:8000/storage/${(task.video_a_path || '').split('\\').pop()?.split('/').pop()}`} />
+                 <video className="w-full h-full object-contain" controls src={`http://localhost:8888/storage/${(task.video_a_path || '').split('\\').pop()?.split('/').pop()}`} />
                </div>
                <div className="flex-1 bg-black aspect-video rounded-lg overflow-hidden border border-border/50">
-                 <video className="w-full h-full object-contain" controls src={`http://localhost:8000/storage/${(task.video_b_path || '').split('\\').pop()?.split('/').pop()}`} />
+                 <video className="w-full h-full object-contain" controls src={`http://localhost:8888/storage/${(task.video_b_path || '').split('\\').pop()?.split('/').pop()}`} />
                </div>
              </div>
            </div>
@@ -185,16 +200,24 @@ export function ResultDetails() {
              <div className="space-y-2">
                <div className="flex gap-2 overflow-x-auto pb-2 custom-scrollbar">
                  {result?.key_frames_a?.map((kf: string, i: number) => (
-                   <img key={i} src={`http://localhost:8000/storage/${kf.replace(/\\/g, '/').replace(/^storage\//, '')}`} 
+                   <img key={i} src={`http://localhost:8888/storage/${kf.replace(/\\/g, '/').replace(/^storage\//, '')}`} 
                         className="w-24 aspect-video object-cover rounded border border-border hover:border-primary cursor-pointer transition-all"
-                        onClick={() => setSelectedImg(`http://localhost:8000/storage/${kf.replace(/\\/g, '/').replace(/^storage\//, '')}`)} />
+                        onClick={() => {
+                          setSelectedImg(`http://localhost:8888/storage/${kf.replace(/\\/g, '/').replace(/^storage\//, '')}`);
+                          setZoom(100);
+                          setPos({ x: 0, y: 0 });
+                        }} />
                  ))}
                </div>
                <div className="flex gap-2 overflow-x-auto pb-2 custom-scrollbar">
                  {result?.key_frames_b?.map((kf: string, i: number) => (
-                   <img key={i} src={`http://localhost:8000/storage/${kf.replace(/\\/g, '/').replace(/^storage\//, '')}`} 
+                   <img key={i} src={`http://localhost:8888/storage/${kf.replace(/\\/g, '/').replace(/^storage\//, '')}`} 
                         className="w-24 aspect-video object-cover rounded border border-border hover:border-primary cursor-pointer transition-all"
-                        onClick={() => setSelectedImg(`http://localhost:8000/storage/${kf.replace(/\\/g, '/').replace(/^storage\//, '')}`)} />
+                        onClick={() => {
+                          setSelectedImg(`http://localhost:8888/storage/${kf.replace(/\\/g, '/').replace(/^storage\//, '')}`);
+                          setZoom(100);
+                          setPos({ x: 0, y: 0 });
+                        }} />
                  ))}
                </div>
              </div>
@@ -218,41 +241,201 @@ export function ResultDetails() {
            </div>
         </div>
 
-        {/* Right: Basics (FULL RESTORED) */}
-        <div className="w-[280px] flex flex-col pl-4 border-l border-border/50 shrink-0 space-y-6">
-          <h4 className="text-sm font-medium">基本信息</h4>
-          <div className="space-y-4 text-xs">
-            <InfoBlock label="任务名称" val={task.task_name} icon={<FileText className="w-3.5 h-3.5"/>} />
-            <InfoBlock label="任务ID" val={task.id} icon={<Hash className="w-3.5 h-3.5"/>} isMono />
-            <InfoBlock label="创建时间" val={new Date(task.created_at).toLocaleString()} icon={<Calendar className="w-3.5 h-3.5"/>} />
-            <InfoBlock label="完成时间" val={task.updated_at ? new Date(task.updated_at).toLocaleString() : '--'} icon={<Clock className="w-3.5 h-3.5"/>} />
-            <InfoBlock label="模型版本" val={task.model_id} icon={<Zap className="w-3.5 h-3.5"/>} isMono />
-            
-            <div className="pt-4 border-t border-border/50 space-y-2">
-              <div className="text-[10px] font-bold text-muted-foreground uppercase">视频规格参数</div>
-              <SpecRow label="视频 A 分辨率" val={task.video_a_resolution} />
-              <SpecRow label="视频 B 分辨率" val={task.video_b_resolution} />
-              <SpecRow label="视频 A 时长" val={task.video_a_duration ? `${task.video_a_duration.toFixed(1)}s` : '--'} />
-              <SpecRow label="视频 B 时长" val={task.video_b_duration ? `${task.video_b_duration.toFixed(1)}s` : '--'} />
-              <SpecRow label="视频 A 大小" val={task.video_a_size ? `${task.video_a_size}MB` : '--'} />
-              <SpecRow label="视频 B 大小" val={task.video_b_size ? `${task.video_b_size}MB` : '--'} />
+        {/* Right: Basics (Redesigned according to mockup) */}
+        <div className="w-[300px] flex flex-col pl-4 border-l border-border/30 shrink-0">
+          <h4 className="text-sm font-bold mb-4 text-foreground/90">基本信息</h4>
+          
+          <div className="bg-[#0b0f1a] rounded-xl p-5 border border-white/5 space-y-5 shadow-2xl">
+            {/* Top Section: Task Info */}
+            <div className="space-y-4">
+              <div className="space-y-1">
+                <div className="text-[11px] text-muted-foreground/60">任务名称:</div>
+                <div className="text-lg font-bold text-foreground tracking-tight">{task.task_name}</div>
+              </div>
+
+              <div className="space-y-1">
+                <div className="text-[11px] text-muted-foreground/60">创建时间:</div>
+                <div className="text-[13px] font-medium text-foreground/90">{new Date(task.created_at).toLocaleString('zh-CN', { hour12: false }).replace(/\//g, '/')}</div>
+              </div>
+
+              <div className="space-y-1">
+                <div className="text-[11px] text-muted-foreground/60">完成时间:</div>
+                <div className="text-[13px] font-medium text-foreground/90">{task.updated_at ? new Date(task.updated_at).toLocaleString('zh-CN', { hour12: false }).replace(/\//g, '/') : '--'}</div>
+              </div>
+
+              <div className="space-y-1">
+                <div className="text-[11px] text-muted-foreground/60">耗时:</div>
+                <div className="text-[15px] font-bold text-foreground">
+                  {task.updated_at ? `${Math.round((new Date(task.updated_at).getTime() - new Date(task.created_at).getTime()) / 1000)} 秒` : '--'}
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <div className="text-[11px] text-muted-foreground/60">模型版本:</div>
+                <div className="text-[13px] font-bold text-foreground font-mono">{task.model_id}</div>
+              </div>
+
+              <div className="space-y-1">
+                <div className="text-[11px] text-muted-foreground/60">识别方式:</div>
+                <div className="flex items-center gap-1.5 text-blue-400 font-medium text-[13px]">
+                  <Video className="w-4 h-4" /> 视频 LLM 识别
+                </div>
+              </div>
             </div>
 
-            <div className="pt-4 border-t border-border/50 space-y-2">
-              <div className="text-[10px] font-bold text-muted-foreground uppercase">资源消耗统计</div>
-              <SpecRow label="Input Tokens" val={task.input_tokens || 0} />
-              <SpecRow label="Output Tokens" val={task.output_tokens || 0} />
+            <div className="h-px bg-white/5" />
+
+            {/* Middle Section: Video Specs */}
+            <div className="space-y-2.5">
+              <div className="flex justify-between items-center text-[12px]">
+                <span className="text-muted-foreground/60">视频时长:</span>
+                <span className="text-foreground font-medium">{task.video_a_duration?.toFixed(1)}s / {task.video_b_duration?.toFixed(1)}s</span>
+              </div>
+              <div className="flex justify-between items-center text-[12px]">
+                <span className="text-muted-foreground/60">分辨率:</span>
+                <span className="text-foreground font-medium">{task.video_a_resolution} / {task.video_b_resolution}</span>
+              </div>
+              <div className="flex justify-between items-center text-[12px]">
+                <span className="text-muted-foreground/60">文件大小:</span>
+                <span className="text-foreground font-medium">{task.video_a_size}MB / {task.video_b_size}MB</span>
+              </div>
+              <div className="flex justify-between items-center text-[12px]">
+                <span className="text-muted-foreground/60">关键帧数量:</span>
+                <span className="text-foreground font-medium">{(result?.key_frames_a || []).length} / {(result?.key_frames_b || []).length}</span>
+              </div>
+            </div>
+
+            <div className="h-px bg-white/5" />
+
+            {/* Bottom Section: Token Usage */}
+            <div className="space-y-2.5">
+              <div className="flex justify-between items-center text-[12px]">
+                <div className="flex items-center gap-1.5">
+                   <div className="w-1 h-1 rounded-full bg-blue-500/50" />
+                   <span className="text-muted-foreground/60">输入 Token:</span>
+                </div>
+                <span className="text-foreground font-bold font-mono">{task.input_tokens || 0}</span>
+              </div>
+              <div className="flex justify-between items-center text-[12px]">
+                <div className="flex items-center gap-1.5">
+                   <div className="w-1 h-1 rounded-full bg-emerald-500/50" />
+                   <span className="text-muted-foreground/60">输出 Token:</span>
+                </div>
+                <span className="text-foreground font-bold font-mono">{task.output_tokens || 0}</span>
+              </div>
             </div>
           </div>
         </div>
       </div>
       
-      {selectedImg && (
-        <div className="fixed inset-0 bg-black/90 backdrop-blur-sm z-[100000] flex items-center justify-center p-8" onClick={()=>setSelectedImg(null)}>
-           <img src={selectedImg} className="max-w-full max-h-full rounded shadow-2xl" />
-           <button className="absolute top-8 right-8 text-white/50 hover:text-white"><X className="w-8 h-8"/></button>
-        </div>
-      )}
+      <AnimatePresence>
+        {selectedImg && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/80 backdrop-blur-md z-[100000] flex items-center justify-center p-8"
+            onClick={() => setSelectedImg(null)}
+          >
+            <motion.div 
+              ref={previewRef}
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-[#1a1f2e]/95 border border-white/10 rounded-2xl w-full max-w-5xl h-[85vh] flex flex-col overflow-hidden shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Header */}
+              <div className="flex items-center justify-between px-6 py-4 border-b border-white/5">
+                <div className="flex items-center gap-3">
+                  <button 
+                    onClick={toggleFullScreen}
+                    className="p-2 bg-blue-500/10 rounded-lg hover:bg-blue-500/20 transition-colors cursor-pointer group"
+                    title="全屏展示"
+                  >
+                    <Scan className="w-5 h-5 text-blue-400 group-hover:scale-110 transition-transform" />
+                  </button>
+                  <div>
+                    <div className="text-sm font-bold text-white">关键帧预览</div>
+                    <div className="text-[10px] text-white/40 tracking-wider">KEYFRAME DETAIL VIEW</div>
+                  </div>
+                </div>
+                
+                <div className="flex items-center gap-4">
+                  <div className="flex items-center gap-2 bg-white/5 px-3 py-1 rounded-full border border-white/5">
+                    <button 
+                      onClick={() => setZoom(z => Math.max(20, z - 10))} 
+                      className="p-1 hover:text-white text-white/50 transition-colors"
+                    >
+                      <Minus className="w-4 h-4" />
+                    </button>
+                    <span className="text-xs font-mono text-white/80 w-12 text-center">{zoom}%</span>
+                    <button 
+                      onClick={() => setZoom(z => Math.min(500, z + 10))} 
+                      className="p-1 hover:text-white text-white/50 transition-colors"
+                    >
+                      <Plus className="w-4 h-4" />
+                    </button>
+                  </div>
+                  <button 
+                    onClick={() => { setZoom(100); setPos({x:0, y:0}); }} 
+                    className="p-2 hover:bg-white/5 rounded-full text-white/50 hover:text-white transition-colors"
+                  >
+                    <RotateCcw className="w-4 h-4" />
+                  </button>
+                  <div className="w-px h-4 bg-white/10 mx-1" />
+                  <button 
+                    onClick={() => setSelectedImg(null)} 
+                    className="p-2 hover:bg-red-500/10 rounded-full text-white/50 hover:text-red-400 transition-colors"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Content */}
+              <div 
+                className="flex-1 relative overflow-hidden bg-[#0a0d14] flex items-center justify-center cursor-grab active:cursor-grabbing"
+                onWheel={(e) => {
+                  const delta = e.deltaY > 0 ? -10 : 10;
+                  setZoom(z => Math.min(500, Math.max(20, z + delta)));
+                }}
+              >
+                 <motion.img 
+                   src={selectedImg} 
+                   animate={{ 
+                     scale: zoom / 100,
+                     x: pos.x,
+                     y: pos.y
+                   }}
+                   transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+                   drag
+                   onDrag={(e, info) => {
+                     setPos(prev => ({
+                       x: prev.x + info.delta.x,
+                       y: prev.y + info.delta.y
+                     }));
+                   }}
+                   className="max-w-[90%] max-h-[90%] object-contain shadow-2xl pointer-events-none select-none"
+                 />
+              </div>
+
+              {/* Footer */}
+              <div className="px-6 py-4 flex items-center justify-between border-t border-white/5 bg-[#1a1f2e]/50 backdrop-blur-sm">
+                <div className="text-[11px] text-white/40 italic flex items-center gap-2">
+                  提示: 滚轮可缩放，放大后可鼠标拖动查看详情
+                </div>
+                <button 
+                  onClick={() => setSelectedImg(null)}
+                  className="px-6 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-medium transition-all shadow-lg shadow-blue-600/20"
+                >
+                  关闭预览
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
@@ -262,27 +445,6 @@ function ScoreRow({ label, val }: { label: string; val: number }) {
     <div className="flex justify-between items-center text-xs">
       <span className="text-muted-foreground">{label}</span>
       <span className="font-bold text-primary">{val || 0}%</span>
-    </div>
-  );
-}
-
-function InfoBlock({ label, val, icon, isMono }: any) {
-  return (
-    <div className="flex gap-3">
-      <div className="p-2 bg-muted rounded-lg shrink-0">{icon}</div>
-      <div className="min-w-0 flex-1">
-        <div className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">{label}</div>
-        <div className={cn("text-xs font-bold truncate", isMono && "font-mono")}>{val || '--'}</div>
-      </div>
-    </div>
-  );
-}
-
-function SpecRow({ label, val }: any) {
-  return (
-    <div className="flex justify-between text-[11px]">
-      <span className="text-muted-foreground">{label}</span>
-      <span className="font-medium">{val || '--'}</span>
     </div>
   );
 }

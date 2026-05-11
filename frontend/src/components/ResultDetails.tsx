@@ -184,7 +184,7 @@ export function ResultDetails() {
     </div>
   </div>
 
-  ${(kfA || kfB) ? `
+  ${((kfA || kfB) && task.preprocess_options?.recognition_mode !== 'video') ? `
   <div id="sec-kf" style="border-top:1px solid rgba(255,255,255,0.06);padding:24px 50px 0;margin-bottom:24px;">
     <h3>环境要素抽取 (Keyframes)</h3>
     ${kfA ? `<div style="margin-bottom:4px;"><span style="font-size:12px;color:#64748b;">视频 A (${(result?.key_frames_a || []).length} 帧)</span></div><div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:20px;">${kfA}</div>` : ''}
@@ -389,41 +389,43 @@ export function ResultDetails() {
             </div>
           </div>
 
-          <div>
-            <h4 className="text-sm font-medium mb-4">环境要素抽取 (Keyframes)</h4>
-            <div className="space-y-2">
-              <div className="flex gap-2 overflow-x-auto pb-2 custom-scrollbar">
-                {result?.key_frames_a?.map((kf: string, i: number) => {
-                  const url = `http://localhost:8888/${kf.replace(/\\/g, '/').replace(/^storage\//, 'storage/')}`;
-                  return (
-                    <img key={i} src={url}
-                      crossOrigin="anonymous"
-                      className="w-24 aspect-video object-cover rounded border border-border hover:border-primary cursor-pointer transition-all"
-                      onClick={() => {
-                        setSelectedImg(url);
-                        setZoom(100);
-                        setPos({ x: 0, y: 0 });
-                      }} />
-                  );
-                })}
-              </div>
-              <div className="flex gap-2 overflow-x-auto pb-2 custom-scrollbar">
-                {result?.key_frames_b?.map((kf: string, i: number) => {
-                  const url = `http://localhost:8888/${kf.replace(/\\/g, '/').replace(/^storage\//, 'storage/')}`;
-                  return (
-                    <img key={i} src={url}
-                      crossOrigin="anonymous"
-                      className="w-24 aspect-video object-cover rounded border border-border hover:border-primary cursor-pointer transition-all"
-                      onClick={() => {
-                        setSelectedImg(url);
-                        setZoom(100);
-                        setPos({ x: 0, y: 0 });
-                      }} />
-                  );
-                })}
+          {task.preprocess_options?.recognition_mode !== 'video' && (
+            <div>
+              <h4 className="text-sm font-medium mb-4">环境要素抽取 (Keyframes)</h4>
+              <div className="space-y-2">
+                <div className="flex gap-2 overflow-x-auto pb-2 custom-scrollbar">
+                  {result?.key_frames_a?.map((kf: string, i: number) => {
+                    const url = `http://localhost:8888/${kf.replace(/\\/g, '/').replace(/^storage\//, 'storage/')}`;
+                    return (
+                      <img key={i} src={url}
+                        crossOrigin="anonymous"
+                        className="w-24 aspect-video object-cover rounded border border-border hover:border-primary cursor-pointer transition-all"
+                        onClick={() => {
+                          setSelectedImg(url);
+                          setZoom(100);
+                          setPos({ x: 0, y: 0 });
+                        }} />
+                    );
+                  })}
+                </div>
+                <div className="flex gap-2 overflow-x-auto pb-2 custom-scrollbar">
+                  {result?.key_frames_b?.map((kf: string, i: number) => {
+                    const url = `http://localhost:8888/${kf.replace(/\\/g, '/').replace(/^storage\//, 'storage/')}`;
+                    return (
+                      <img key={i} src={url}
+                        crossOrigin="anonymous"
+                        className="w-24 aspect-video object-cover rounded border border-border hover:border-primary cursor-pointer transition-all"
+                        onClick={() => {
+                          setSelectedImg(url);
+                          setZoom(100);
+                          setPos({ x: 0, y: 0 });
+                        }} />
+                    );
+                  })}
+                </div>
               </div>
             </div>
-          </div>
+          )}
 
           <div>
             <h4 className="text-sm font-medium mb-4">AI 综合分析结论</h4>

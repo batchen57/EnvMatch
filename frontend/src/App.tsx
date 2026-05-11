@@ -8,7 +8,9 @@ import { Overview } from './components/Overview';
 import { ResultReport } from './components/ResultReport';
 import { PromptConfig } from './components/PromptConfig';
 import { ModelConfig } from './components/ModelConfig';
-import { Bell, HelpCircle } from 'lucide-react';
+import { ModelLogs } from './components/ModelLogs';
+import { SolutionIntro } from './components/SolutionIntro';
+import { Bell, HelpCircle, Info, ListFilter } from 'lucide-react';
 function Dashboard() {
   return (
     <div className="flex flex-col gap-6">
@@ -52,6 +54,8 @@ function App() {
             <Route path="/tasks/:id" element={<ResultDetails />} />
             <Route path="/prompts" element={<PromptConfig />} />
             <Route path="/models" element={<ModelConfig />} />
+            <Route path="/model-logs" element={<ModelLogs />} />
+            <Route path="/solutions" element={<SolutionIntro />} />
             <Route path="*" element={<Navigate to="/dashboard" replace />} />
           </Routes>
         </main>

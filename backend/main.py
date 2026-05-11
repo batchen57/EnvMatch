@@ -399,3 +399,20 @@ def delete_model(model_id: str, db: Session = Depends(get_db)):
     db.delete(db_model)
     db.commit()
     return {"status": "ok"}
+@app.get("/model-logs/")
+def list_model_logs(search: str = None, skip: int = 0, limit: int = 10, db: Session = Depends(get_db)):
+    query = db.query(models.ModelCallLog)
+    if search:
+        query = query.filter(
+            (models.ModelCallLog.task_name.ilike(f"%{search}%")) |
+            (models.ModelCallLog.task_id.ilike(f"%{search}%")) |
+            (models.ModelCallLog.model_id.ilike(f"%{search}%"))
+        )
+    
+    total = query.count()
+    logs = query.order_by(models.ModelCallLog.started_at.desc()).offset(skip).limit(limit).all()
+    
+    return {
+        "logs": logs,
+        "total": total
+    }

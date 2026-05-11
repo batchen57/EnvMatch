@@ -77,6 +77,13 @@ export function TaskCreation({ onClose, onTaskCreated }: { onClose: () => void, 
       }
     }
 
+    if (currentStep === 3) {
+      if (!selectedModelId) {
+        setError("请选择一个模型进行分析");
+        return;
+      }
+    }
+
     if (currentStep < 5) {
       setCurrentStep(currentStep + 1);
     } else {
@@ -333,28 +340,28 @@ export function TaskCreation({ onClose, onTaskCreated }: { onClose: () => void, 
                   </div>
                 </div>
 
-                {/* 模式特定配置 */}
-                <div className="mt-3 p-4 bg-muted/10 border border-border rounded-lg space-y-4">
-                  <div>
-                    <label className="text-xs font-medium text-primary flex items-center gap-2 mb-2">
-                      <Zap className="w-3 h-3" />
-                      采样配置
-                    </label>
-                    <div className="flex flex-wrap gap-4">
-                      <div 
-                        className="flex items-center gap-2 cursor-pointer"
-                        onClick={() => setPreprocessOptions({...preprocessOptions, sampling_type: 'fixed'})}
-                      >
-                        <div className={cn(
-                          "w-3 h-3 rounded-full border flex items-center justify-center",
-                          preprocessOptions.sampling_type === 'fixed' ? "border-primary bg-primary" : "border-muted-foreground"
-                        )}>
-                          {preprocessOptions.sampling_type === 'fixed' && <div className="w-1 h-1 rounded-full bg-white" />}
+                {/* 模式特定配置 - 仅在图像模式下展示采样配置 */}
+                {preprocessOptions.recognition_mode === 'image' && (
+                  <div className="mt-3 p-4 bg-muted/10 border border-border rounded-lg space-y-4">
+                    <div>
+                      <label className="text-xs font-medium text-primary flex items-center gap-2 mb-2">
+                        <Zap className="w-3 h-3" />
+                        采样配置
+                      </label>
+                      <div className="flex flex-wrap gap-4">
+                        <div 
+                          className="flex items-center gap-2 cursor-pointer"
+                          onClick={() => setPreprocessOptions({...preprocessOptions, sampling_type: 'fixed'})}
+                        >
+                          <div className={cn(
+                            "w-3 h-3 rounded-full border flex items-center justify-center",
+                            preprocessOptions.sampling_type === 'fixed' ? "border-primary bg-primary" : "border-muted-foreground"
+                          )}>
+                            {preprocessOptions.sampling_type === 'fixed' && <div className="w-1 h-1 rounded-full bg-white" />}
+                          </div>
+                          <span className="text-xs">按秒抽帧</span>
                         </div>
-                        <span className="text-xs">按秒抽帧</span>
-                      </div>
-                      
-                      {preprocessOptions.recognition_mode === 'image' && (
+                        
                         <div 
                           className="flex items-center gap-2 cursor-pointer"
                           onClick={() => setPreprocessOptions({...preprocessOptions, sampling_type: 'perceptual'})}
@@ -367,42 +374,42 @@ export function TaskCreation({ onClose, onTaskCreated }: { onClose: () => void, 
                           </div>
                           <span className="text-xs">感知抽帧</span>
                         </div>
-                      )}
-                    </div>
-                  </div>
-
-                  {preprocessOptions.sampling_type === 'fixed' && (
-                    <div className="flex items-center gap-3 pt-1 border-t border-border/50">
-                      <span className="text-[10px] text-muted-foreground">采样频率:</span>
-                      <div className="flex gap-1.5">
-                        {[1, 2, 5].map(v => (
-                          <button 
-                            key={v} 
-                            onClick={() => setPreprocessOptions({...preprocessOptions, sampling_fps: v})}
-                            className={cn(
-                              "text-[10px] px-2 py-0.5 rounded border transition-colors", 
-                              preprocessOptions.sampling_fps === v ? "bg-primary text-white border-primary" : "border-border hover:border-primary/50"
-                            )}
-                          >
-                            {v}fps
-                          </button>
-                        ))}
                       </div>
                     </div>
-                  )}
 
-                  {preprocessOptions.sampling_type === 'perceptual' && preprocessOptions.recognition_mode === 'image' && (
-                    <div className="pt-2 border-t border-border/50 space-y-1.5">
-                      <p className="text-[10px] text-emerald-500 font-medium flex items-center gap-1">
-                        <Zap className="w-3 h-3" />
-                        感知模式已激活：PySceneDetect + Optical Flow
-                      </p>
-                      <p className="text-[10px] text-muted-foreground leading-relaxed">
-                        基于 ContentDetector 锁定像素剧变瞬间（如车辆经过、室内外切换），结合光流法追踪摄像机位移。当位移累计超过 30% 画面宽度时强制补帧，确保极慢速扫摄不失真。
-                      </p>
-                    </div>
-                  )}
-                </div>
+                    {preprocessOptions.sampling_type === 'fixed' && (
+                      <div className="flex items-center gap-3 pt-1 border-t border-border/50">
+                        <span className="text-[10px] text-muted-foreground">采样频率:</span>
+                        <div className="flex gap-1.5">
+                          {[1, 2, 5].map(v => (
+                            <button 
+                              key={v} 
+                              onClick={() => setPreprocessOptions({...preprocessOptions, sampling_fps: v})}
+                              className={cn(
+                                "text-[10px] px-2 py-0.5 rounded border transition-colors", 
+                                preprocessOptions.sampling_fps === v ? "bg-primary text-white border-primary" : "border-border hover:border-primary/50"
+                              )}
+                            >
+                              {v}fps
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {preprocessOptions.sampling_type === 'perceptual' && (
+                      <div className="pt-2 border-t border-border/50 space-y-1.5">
+                        <p className="text-[10px] text-emerald-500 font-medium flex items-center gap-1">
+                          <Zap className="w-3 h-3" />
+                          感知模式已激活：PySceneDetect + Optical Flow
+                        </p>
+                        <p className="text-[10px] text-muted-foreground leading-relaxed">
+                          基于 ContentDetector 锁定像素剧变瞬间，结合光流法追踪摄像机位移，确保识别精度。
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* 2. 视频预处理配置 */}

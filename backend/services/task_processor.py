@@ -9,7 +9,11 @@ from sqlalchemy.orm import Session
 from database import SessionLocal
 import models
 import time
+import datetime
+import math
+import logging
 from typing import List, Dict
+import pathlib
 
 # --- 后端：强制标准 Key 输出与多帧保障 ---
 
@@ -22,7 +26,108 @@ def get_video_metadata(video_path: str) -> Dict:
         return {"duration": duration, "resolution": f"{vs['width']}x{vs['height']}", "size_mb": round(os.path.getsize(video_path)/1024/1024, 2), "fps": eval(vs['avg_frame_rate']) if '/' in vs['avg_frame_rate'] else float(vs['avg_frame_rate'])}
     except: return {"duration": 0, "resolution": "unknown", "size_mb": 0, "fps": 0}
 
-def analyze_with_vlm(frames_a: List[str], frames_b: List[str], prompt: str, api_key: str, base_url: str, model_id: str, provider: str = None):
+def _parse_json_result(ans: str) -> Dict:
+    """提取并解析 AI 返回的内容中的 JSON 数据块"""
+    import re
+    text = ans
+    if "```json" in text: 
+        try:
+            text = text.split("```json")[1].split("```")[0].strip()
+        except IndexError: pass
+    elif "```" in text: 
+        try:
+            text = text.split("```")[1].split("```")[0].strip()
+        except IndexError: pass
+    else:
+        match = re.search(r'\{.*\}', text, re.DOTALL)
+        if match: text = match.group(0)
+    
+    if not text:
+        raise Exception(f"AI 返回的内容中未找到有效的 JSON 数据块。")
+        
+    try:
+        clean_text = text.strip()
+        raw_res = json.loads(clean_text)
+    except:
+        fixed_text = re.sub(r',\s*([\]}])', r'\1', text)
+        try:
+            raw_res = json.loads(fixed_text)
+        except Exception as e:
+            raise Exception(f"解析 AI 返回的 JSON 失败: {str(e)}")
+
+    # 归一化维度评分
+    d = raw_res.get("dimension_scores", {})
+    mapped = {
+        "lighting_weather": d.get("lighting_weather", d.get("光照天气", 0)),
+        "architecture": d.get("architecture", d.get("建筑风格", 0)),
+        "facilities": d.get("facilities", d.get("固定设施", 0)),
+        "vegetation": d.get("vegetation", d.get("植被绿化", 0)),
+        "road_surface": d.get("road_surface", d.get("地面材质", 0))
+    }
+    raw_res["dimension_scores"] = mapped
+    return raw_res
+
+# --- Qwen-VL 专用 Token 计算逻辑 ---
+logger = logging.getLogger(__name__)
+QWEN_FRAME_FACTOR = 2
+QWEN_IMAGE_FACTOR = 32
+QWEN_MAX_RATIO = 200
+QWEN_VIDEO_MIN_PIXELS = 4 * 32 * 32
+QWEN_VIDEO_MAX_PIXELS = 640 * 32 * 32
+QWEN_FPS = 2.0
+QWEN_FPS_MIN_FRAMES = 4
+QWEN_FPS_MAX_FRAMES = 2000
+QWEN_VIDEO_TOTAL_PIXELS = 131072 * 32 * 32
+
+def round_by_factor(number: int, factor: int) -> int:
+    return round(number / factor) * factor
+
+def ceil_by_factor(number: int, factor: int) -> int:
+    return math.ceil(number / factor) * factor
+
+def floor_by_factor(number: int, factor: int) -> int:
+    return math.floor(number / factor) * factor
+
+def smart_nframes(fps_param, total_frames, video_fps):
+    fps = fps_param or QWEN_FPS
+    min_frames = ceil_by_factor(QWEN_FPS_MIN_FRAMES, QWEN_FRAME_FACTOR)
+    max_frames = floor_by_factor(min(QWEN_FPS_MAX_FRAMES, total_frames), QWEN_FRAME_FACTOR)
+    duration = total_frames / video_fps if video_fps != 0 else 0
+    total_frames_adj = math.ceil(duration * video_fps)
+    nframes = total_frames_adj / video_fps * fps if video_fps != 0 else 0
+    nframes = int(min(min(max(nframes, min_frames), max_frames), total_frames))
+    return nframes
+
+def qwen_token_calculate(video_path, fps=1):
+    if not video_path or not os.path.exists(video_path): return 0
+    try:
+        cap = cv2.VideoCapture(video_path)
+        w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        total_f = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        v_fps = cap.get(cv2.CAP_PROP_FPS)
+        cap.release()
+        if total_f <= 0 or v_fps <= 0: return 0
+        
+        nframes = smart_nframes(fps, total_f, v_fps)
+        max_pixels = max(min(QWEN_VIDEO_MAX_PIXELS, QWEN_VIDEO_TOTAL_PIXELS / nframes * QWEN_FRAME_FACTOR), int(QWEN_VIDEO_MIN_PIXELS * 1.05))
+        
+        h_bar = max(QWEN_IMAGE_FACTOR, round_by_factor(h, QWEN_IMAGE_FACTOR))
+        w_bar = max(QWEN_IMAGE_FACTOR, round_by_factor(w, QWEN_IMAGE_FACTOR))
+        if h_bar * w_bar > max_pixels:
+            beta = math.sqrt((h * w) / max_pixels)
+            h_bar = floor_by_factor(h / beta, QWEN_IMAGE_FACTOR)
+            w_bar = floor_by_factor(w / beta, QWEN_IMAGE_FACTOR)
+        elif h_bar * w_bar < QWEN_VIDEO_MIN_PIXELS:
+            beta = math.sqrt(QWEN_VIDEO_MIN_PIXELS / (h * w))
+            h_bar = ceil_by_factor(h * beta, QWEN_IMAGE_FACTOR)
+            w_bar = ceil_by_factor(w * beta, QWEN_IMAGE_FACTOR)
+            
+        video_token = int(math.ceil(nframes / 2) * (h_bar / 32) * (w_bar / 32)) + 2
+        return video_token
+    except: return 0
+
+def analyze_with_vlm(frames_a: List[str], frames_b: List[str], prompt: str, api_key: str, base_url: str, model_id: str, provider: str = None, recognition_mode: str = "image", video_a_path: str = None, video_b_path: str = None, task_id: str = None, task_name: str = None):
     """
     通用 VLM 分析接口，支持 MiniMax 专用端点和标准 OpenAI 兼容格式
     """
@@ -67,6 +172,7 @@ def analyze_with_vlm(frames_a: List[str], frames_b: List[str], prompt: str, api_
     
     # 自动识别端点类型并处理 URL
     is_native_vlm = "/coding_plan/vlm" in base_url
+    started_at = datetime.datetime.now()
     
     request_url = base_url
     if not is_native_vlm:
@@ -74,10 +180,109 @@ def analyze_with_vlm(frames_a: List[str], frames_b: List[str], prompt: str, api_
         if not request_url.endswith("/chat/completions"):
             request_url = request_url.rstrip("/") + "/chat/completions"
     
+    # --- 特殊处理：Qwen-VL-Plus 原生视频识别 (使用 DashScope SDK) ---
+    if recognition_mode == "video" and "qwen" in model_id.lower() and video_a_path and video_b_path:
+        try:
+            import dashscope
+            dashscope.api_key = api_key
+            
+            # 将相对路径转换为绝对路径
+            abs_a = str(pathlib.Path(video_a_path).absolute())
+            abs_b = str(pathlib.Path(video_b_path).absolute())
+            
+            print(f"DEBUG: Using DashScope Native Video Analysis for {model_id}")
+            print(f"Video A: {abs_a}, Video B: {abs_b}")
+
+            # 构造多模态消息，包含 A 和 B 两个视频
+            messages = [{
+                "role": "user",
+                "content": [
+                    {"video": f"file://{abs_a}"},
+                    {"video": f"file://{abs_b}"},
+                    {"text": vlm_prompt}
+                ]
+            }]
+            
+            response = dashscope.MultiModalConversation.call(
+                model=model_id,
+                messages=messages
+            )
+            
+            if response.status_code == 200:
+                ended_at = datetime.datetime.now()
+                ans = response.output.choices[0].message.content[0]["text"]
+                # 提取 Token
+                it = response.usage.input_tokens if hasattr(response.usage, "input_tokens") else 0
+                ot = response.usage.output_tokens if hasattr(response.usage, "output_tokens") else 0
+                
+                # 如果 Token 为 0，进行估算以获得更准确的记录
+                if it == 0:
+                    it = qwen_token_calculate(video_a_path) + qwen_token_calculate(video_b_path) + (len(vlm_prompt) // 2 + 150)
+                if ot == 0: ot = len(ans) // 2
+
+                # 记录日志
+                try:
+                    # 将 DashScope 对象转换为可序列化的字典
+                    res_body = {}
+                    if hasattr(response, 'output'):
+                        try: res_body = json.loads(json.dumps(response.output))
+                        except: res_body = str(response.output)
+
+                    db = SessionLocal()
+                    log = models.ModelCallLog(
+                        task_id=task_id, task_name=task_name,
+                        model_id=model_id, model_url=base_url or "DashScope SDK",
+                        request_payload=messages, response_body=res_body,
+                        started_at=started_at, ended_at=ended_at, status_code="200",
+                        input_tokens=it, output_tokens=ot
+                    )
+                    db.add(log)
+                    db.commit()
+                    db.close()
+                except Exception as le:
+                    print(f"Logging Error (Video Mode): {le}")
+
+                # DashScope 的 Token 统计在 usage 字段
+                usage = {
+                    "prompt_tokens": response.usage.input_tokens if hasattr(response.usage, "input_tokens") else 0,
+                    "completion_tokens": response.usage.output_tokens if hasattr(response.usage, "output_tokens") else 0
+                }
+                # 解析返回的 JSON (复用下面的解析逻辑)
+                # 由于后面还有解析逻辑，我们先跳转到结果处理
+                return {"result": _parse_json_result(ans), "usage": usage}
+            else:
+                print(f"DashScope Error: {response.code} - {response.message}")
+                # 如果 SDK 失败，回退到普通逻辑
+        except Exception as de:
+            print(f"DashScope SDK Exception: {de}")
+            # 回退
+    
     if is_native_vlm:
         payload = {"prompt": vlm_prompt, "image_url": f"data:image/jpeg;base64,{b64_grid}"}
+    elif recognition_mode == "video" and ("qwen" in model_id.lower() or "gemini" in model_id.lower() or "gpt-4" in model_id.lower()):
+        # 视频识别模式：传送到支持多图/视频流的模型（如 Qwen, Gemini, GPT-4o）
+        # 将采样帧作为独立图像序列发送，利用模型的时序理解能力
+        content_list = [{"type": "text", "text": vlm_prompt}]
+        
+        # 提取 A 和 B 的采样帧 (最多各取 5 帧，避免 Token 溢出)
+        for f in frames_a[:5]:
+            with open(os.path.abspath(f), "rb") as image_file:
+                b64 = base64.b64encode(image_file.read()).decode('utf-8')
+                content_list.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}})
+        
+        for f in frames_b[:5]:
+            with open(os.path.abspath(f), "rb") as image_file:
+                b64 = base64.b64encode(image_file.read()).decode('utf-8')
+                content_list.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}})
+
+        payload = {
+            "model": model_id,
+            "messages": [{"role": "user", "content": content_list}],
+            "temperature": 0.1,
+            "max_tokens": 1024
+        }
     else:
-        # 标准 OpenAI 兼容格式
+        # 标准 OpenAI 兼容格式 (图像网格模式)
         payload = {
             "model": model_id,
             "messages": [
@@ -104,7 +309,42 @@ def analyze_with_vlm(frames_a: List[str], frames_b: List[str], prompt: str, api_
 
     try:
         response = requests.post(request_url, headers=headers, json=payload, timeout=120)
+        ended_at = datetime.datetime.now()
         
+        it, ot = 0, 0
+        ans = ""
+        if response.status_code == 200:
+            rj = response.json()
+            usage = rj.get("usage", {})
+            it = usage.get("prompt_tokens", usage.get("input_tokens", 0))
+            ot = usage.get("completion_tokens", usage.get("output_tokens", 0))
+            
+            # 尝试提取回答内容用于估算
+            if is_native_vlm:
+                ans = rj.get('content') or ""
+            else:
+                choices = rj.get('choices', [])
+                if choices: ans = choices[0].get('message', {}).get('content', '')
+            
+            # 如果 Token 为 0，进行估算
+            if it == 0: it = len(vlm_prompt) // 2 + 150
+            if ot == 0: ot = len(ans) // 2
+
+        # 记录日志
+        try:
+            db = SessionLocal()
+            log = models.ModelCallLog(
+                task_id=task_id, task_name=task_name,
+                model_id=model_id, model_url=request_url,
+                request_payload=payload, response_body=response.json() if response.status_code == 200 else {"error": response.text},
+                started_at=started_at, ended_at=ended_at, status_code=str(response.status_code),
+                input_tokens=it, output_tokens=ot
+            )
+            db.add(log)
+            db.commit()
+            db.close()
+        except: pass
+
         # 记录调试信息
         print(f"VLM Request URL: {request_url}")
         print(f"VLM Response Status: {response.status_code}")
@@ -148,60 +388,20 @@ def analyze_with_vlm(frames_a: List[str], frames_b: List[str], prompt: str, api_
         print(f"AI Response Content: {ans[:200]}...")
         
         # 解析 JSON
-        text = ans
-        if "```json" in text: 
-            try:
-                text = text.split("```json")[1].split("```")[0].strip()
-            except IndexError:
-                pass
-        elif "```" in text: 
-            try:
-                text = text.split("```")[1].split("```")[0].strip()
-            except IndexError:
-                pass
-        else:
-            # 如果没有代码块标记，尝试寻找第一个 { 和最后一个 }
-            import re
-            match = re.search(r'\{.*\}', text, re.DOTALL)
-            if match:
-                text = match.group(0)
-        
-        if not text:
-            raise Exception(f"AI 返回的内容中未找到有效的 JSON 数据块。原始回复: {ans[:200]}...")
-            
-        try:
-            # 预处理：移除一些可能导致解析失败的非标准字符
-            clean_text = text.strip()
-            raw_res = json.loads(clean_text)
-        except Exception as e:
-            # 尝试修复一些常见的 JSON 错误（如多余逗号）
-            import re
-            fixed_text = re.sub(r',\s*([\]}])', r'\1', text)
-            try:
-                raw_res = json.loads(fixed_text)
-            except Exception as e2:
-                raise Exception(f"解析 AI 返回的 JSON 失败: {str(e2)}。待解析文本: {text[:200]}...")
-
-        # 归一化维度评分
-        d = raw_res.get("dimension_scores", {})
-        mapped = {
-            "lighting_weather": d.get("lighting_weather", d.get("光照天气", 0)),
-            "architecture": d.get("architecture", d.get("建筑风格", 0)),
-            "facilities": d.get("facilities", d.get("固定设施", 0)),
-            "vegetation": d.get("vegetation", d.get("植被绿化", 0)),
-            "road_surface": d.get("road_surface", d.get("地面材质", 0))
-        }
-        raw_res["dimension_scores"] = mapped
+        raw_res = _parse_json_result(ans)
         
         # 提取 Token 使用信息
         usage = rj.get("usage", {})
         
-        # MiniMax Native VLM 特殊处理：如果 usage 为空，尝试进行估算
-        if not usage and is_native_vlm:
-            # 输入：提示词长度 + 图像固定消耗 (MiniMax 约为 100-200)
-            # 输出：内容长度
-            prompt_tokens = len(vlm_prompt) // 2 + 150 
+        # 如果 usage 为空 (MiniMax Native VLM 或其他情况)，进行估算
+        if not usage:
             completion_tokens = len(ans) // 2
+            if recognition_mode == "video" and video_a_path and video_b_path:
+                # 使用 Qwen 专用算法计算视频 Token
+                prompt_tokens = qwen_token_calculate(video_a_path) + qwen_token_calculate(video_b_path) + (len(vlm_prompt) // 2 + 150)
+            else:
+                prompt_tokens = len(vlm_prompt) // 2 + 150 
+            
             usage = {
                 "prompt_tokens": prompt_tokens,
                 "completion_tokens": completion_tokens,
@@ -291,6 +491,23 @@ def extract_perceptual_frames(video_path: str, output_dir: str, resolution: int 
     cap.release()
     return sorted(frames)
 
+def preprocess_video_for_vlm(video_path: str, task_id: str, suffix: str, target_res: int) -> str:
+    """使用 FFmpeg 对原始视频进行压制和缩放，以适配 VLM 分析需求"""
+    out_path = os.path.join("storage", f"{task_id}_{suffix}_processed.mp4").replace("\\", "/")
+    try:
+        # scale=-2:target_res 确保高度为 target_res 且宽度为偶数（libx264 要求）
+        (
+            ffmpeg
+            .input(video_path)
+            .output(out_path, vf=f"scale=-2:{target_res}", vcodec='libx264', crf=28, preset='faster', acodec='aac')
+            .overwrite_output()
+            .run(capture_stdout=True, capture_stderr=True)
+        )
+        return out_path
+    except Exception as e:
+        print(f"Video Compression Error for {suffix}: {e}")
+        return video_path
+
 def process_video_task(task_id: str):
     db = SessionLocal()
     try:
@@ -312,6 +529,22 @@ def process_video_task(task_id: str):
         fa = extract_frames(t.video_a_path, task_id, "A", fps, res, False, st)
         fb = extract_frames(t.video_b_path, task_id, "B", fps, res, False, st)
         
+        recognition_mode = opts.get("recognition_mode", "image")
+        v_a_payload_path, v_b_payload_path = t.video_a_path, t.video_b_path
+
+        # 如果是视频识别模式且开启了分辨率调整，则执行实际的视频压缩
+        if recognition_mode == "video" and opts.get("resolution"):
+            print(f"Starting video compression to {res}p...")
+            v_a_payload_path = preprocess_video_for_vlm(t.video_a_path, task_id, "A", res)
+            v_b_payload_path = preprocess_video_for_vlm(t.video_b_path, task_id, "B", res)
+            
+            # 更新元数据以反映压缩后的实际载荷规格
+            meta_a_p = get_video_metadata(v_a_payload_path)
+            meta_b_p = get_video_metadata(v_b_payload_path)
+            t.video_a_resolution, t.video_a_size = meta_a_p["resolution"], meta_a_p["size_mb"]
+            t.video_b_resolution, t.video_b_size = meta_b_p["resolution"], meta_b_p["size_mb"]
+            db.commit()
+
         tr = db.query(models.TaskResult).filter(models.TaskResult.task_id == task_id).first()
         if not tr: db.add(models.TaskResult(task_id=task_id, summary="处理中...", key_frames_a=fa, key_frames_b=fb))
         else: tr.key_frames_a, tr.key_frames_b = fa, fb
@@ -336,20 +569,20 @@ def process_video_task(task_id: str):
                 print(f"Payload Info Error: {e}")
                 return "error", 0.0
 
-        res_a, size_a = get_payload_info(fa)
-        res_b, size_b = get_payload_info(fb)
+        if recognition_mode == "image":
+            res_a, size_a = get_payload_info(fa)
+            res_b, size_b = get_payload_info(fb)
+            t.video_a_resolution, t.video_a_size = res_a, size_a
+            t.video_b_resolution, t.video_b_size = res_b, size_b
+            db.commit()
+            print(f"Image Mode Payload Specs - A: {res_a} ({size_a}MB), B: {res_b} ({size_b}MB)")
         
-        # 强制更新任务的分辨率信息
-        t.video_a_resolution = res_a
-        t.video_a_size = size_a
-        t.video_b_resolution = res_b
-        t.video_b_size = size_b
-        db.commit()
         db.refresh(t)
 
         try:
             provider = cfg.provider if cfg else "Unknown"
-            vlm_response = analyze_with_vlm(fa, fb, t.prompt, key, url, t.model_id, provider)
+            # 传入压缩后（或原始）视频路径以支持原生视频识别，同时传入任务 ID 和名称用于日志记录
+            vlm_response = analyze_with_vlm(fa, fb, t.prompt, key, url, t.model_id, provider, recognition_mode, v_a_payload_path, v_b_payload_path, t.id, t.task_name)
             air = vlm_response.get("result", {})
             usage = vlm_response.get("usage", {})
             

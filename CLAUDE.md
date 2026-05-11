@@ -2,14 +2,14 @@
 
 ## Project Overview
 
-EnvMatch AI — 视频环境相似度对比平台 (v1.2.0)。用户上传两段视频，系统通过多模态大模型分析背景环境的相似度，输出综合评分、维度评分、相似点/差异点及分析报告。支持多种 AI 模型 (Gemini, GPT-4o, Qwen-VL, MiniMax 等) 和识别模式 (图片模式/视频模式)。
+EnvMatch AI — 视频环境相似度对比平台 (v1.4.0)。用户上传两段视频，系统通过多模态大模型分析背景环境的相似度，输出综合评分、维度评分、相似点/差异点及分析报告。支持多种 AI 模型 (Gemini, GPT-4o, Qwen-VL, MiniMax 等) 和识别模式 (图片模式/视频模式)。新增全量模型调用审计与专业 Token 估算体系。
 
 ## Tech Stack
 
 - **Backend**: Python 3, FastAPI, SQLAlchemy, SQLite (可切换 PostgreSQL)
 - **Frontend**: React 19, TypeScript, Vite 8, Tailwind CSS v4, ECharts, React Router v7, Framer Motion, Radix UI, dnd-kit
-- **AI**: 多模型支持 — Google Gemini (原生视频), OpenAI 兼容接口 (GPT-4o, Qwen3-VL, MiniMax, DeepSeek 等)
-- **Video Processing**: FFmpeg (抽帧/预处理), PySceneDetect (场景检测), OpenCV (光流分析)
+- **AI**: 多模型支持 — Google Gemini (原生视频), DashScope SDK (Qwen-VL 原生视频), OpenAI 兼容接口 (GPT-4o, MiniMax, DeepSeek 等)
+- **Video Processing**: FFmpeg (抽帧/压制/预处理), PySceneDetect (场景检测), OpenCV (光流分析)
 
 ## Project Structure
 
@@ -28,12 +28,14 @@ EnvMatch/
 │   │   ├── main.tsx         # React 入口, BrowserRouter
 │   │   ├── App.tsx          # 根布局 (Sidebar + Header + Routes)
 │   │   ├── components/
-│   │   │   ├── Sidebar.tsx      # 侧边导航 (5 项: 工作台/任务管理/结果报表/提示词配置/模型管理)
+│   │   │   ├── Sidebar.tsx      # 侧边导航 (含方案介绍、调用记录等 7 项)
+│   │   │   ├── PlatformSolutions.tsx # 方案介绍: 动效对比图像 vs 视频模式原理
+│   │   │   ├── ModelLogs.tsx    # 模型调用记录: 全量审计 + JSON 全屏查看 (支持拖拽/缩放)
 │   │   │   ├── Pipeline.tsx     # 5 步分析流程可视化 (静态展示)
 │   │   │   ├── Overview.tsx     # 仪表盘: 统计卡片 + ECharts 趋势图 + 分布饼图
 │   │   │   ├── TaskList.tsx     # 任务列表: 表格 + 状态筛选标签 + 5s 自动轮询 + 分页
-│   │   │   ├── TaskCreation.tsx # 新建任务向导 (5 步可拖拽模态框)
-│   │   │   ├── ResultDetails.tsx # 结果详情: 环形图 + 雷达图 + 视频播放 + AI 分析 + 关键帧 + PDF 导出
+│   │   │   ├── TaskCreation.tsx # 新建任务向导 (5 步校验 + 物理压缩配置)
+│   │   │   ├── ResultDetails.tsx # 结果详情: 环形图 + 雷达图 + 视频播放 + AI 分析 + PDF 导出 (隐藏视频模式 Keyframes)
 │   │   │   ├── ResultReport.tsx # 结果报表: 统计卡片 + 雷达图 + 模型性能图 + 趋势图 + 分布图
 │   │   │   ├── ModelConfig.tsx  # 模型管理: CRUD + 拖拽排序 + 预设模板 + 能力标签
 │   │   │   └── PromptConfig.tsx # 提示词管理: CRUD + 搜索 + 卡片网格
@@ -62,6 +64,7 @@ EnvMatch/
 | POST | `/models/` | 创建 AI 模型 |
 | PUT | `/models/{model_id}` | 更新 AI 模型 |
 | DELETE | `/models/{model_id}` | 删除 AI 模型 |
+| GET | `/model-logs/` | 模型调用记录列表 (支持 search/skip/limit 分页) |
 
 ## Data Models
 
@@ -71,6 +74,8 @@ EnvMatch/
 
 **AIModel**: id (UUID), name, identifier, provider, api_key, base_url, description, capabilities (JSON: [text/image/video]), is_default, sort_order, created_at, updated_at
 
+**ModelCallLog**: id (Int), task_id, task_name, model_id, model_url, request_payload (JSON), response_body (JSON), started_at, ended_at, status_code, input_tokens, output_tokens
+
 **PromptTemplate**: id (UUID), name, content, created_at, updated_at
 
 ## Task Processing Pipeline
@@ -78,16 +83,14 @@ EnvMatch/
 1. `POST /tasks/` → 保存视频文件到 `storage/`, 创建 PENDING 状态 Task
 2. 后台 `process_video_task()`:
    - 状态 → PROCESSING, 读取 preprocess_options
-   - 可选预处理: FFmpeg 缩放/转格式/去噪 (`preprocess_video`)
-   - 抽帧 (`extract_frames`):
-     - 图片输入 (jpg/png/bmp/webp): 直接复制
-     - 固定采样 (fixed): FFmpeg 按 fps 抽帧, 缩放到目标分辨率
-     - 感知采样 (perceptual): PySceneDetect 场景检测 + OpenCV 光流分析, 上限 20 帧
+   - 可选预处理: FFmpeg 物理压缩 (`preprocess_video_for_vlm`) → 降低分辨率至 360p-1080p
+   - 抽帧 (`extract_frames`): 图像模式下用于缝合，视频模式下用于 UI 预览
    - AI 分析路由:
-     - `recognition_mode="video"` + Gemini → `analyze_environment_with_gemini()` (原生视频上传)
-     - `recognition_mode="video"` + Qwen → `analyze_with_qwen_video()` (base64 视频)
-     - 其他 → `analyze_with_openai_compatible()` (首帧图片 + OpenAI 兼容 API)
-   - 解析 AI 返回的 JSON (含 Markdown 代码块剥离)
+     - `recognition_mode="video"` + Qwen → **DashScope SDK** (`MultiModalConversation.call`)
+     - `recognition_mode="video"` + Gemini → `analyze_environment_with_gemini()`
+     - 其他 → `analyze_with_openai_compatible()` (图像网格缝合 + OpenAI 兼容 API)
+   - **Token 估算**: 针对无 Usage 返回的 Qwen-VL 视频任务，应用官方 `smart_nframes` + `smart_resize` 算法估算
+   - **审计入库**: 每次 API 调用结束后，自动将 Payload 与响应持久化至 `ModelCallLog` 表
    - 状态 → COMPLETED, 写入 TaskResult, 更新 Task (score/tokens)
    - 失败 → FAILED, 写入 error_message
    - 可选: 通过 `WEBHOOK_URL` 环境变量发送完成通知
@@ -103,6 +106,8 @@ EnvMatch/
 | `/results` | ResultReport | 结果报表 |
 | `/prompts` | PromptConfig | 提示词模板管理 |
 | `/models` | ModelConfig | AI 模型管理 |
+| `/solutions` | PlatformSolutions | 平台方案介绍 |
+| `/logs` | ModelLogs | 模型调用审计 |
 
 ## Running Locally
 

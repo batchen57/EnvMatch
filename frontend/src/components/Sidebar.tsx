@@ -1,6 +1,6 @@
 import React from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Home, List, BarChart2, FileText, Box } from 'lucide-react';
+import { Home, List, BarChart2, FileText, Box, Info, ListFilter } from 'lucide-react';
 import { cn } from '@/lib/utils';
 export function Sidebar() {
   const location = useLocation();
@@ -12,6 +12,8 @@ export function Sidebar() {
     { icon: BarChart2, label: '结果报表', path: '/results' },
     { icon: FileText, label: '提示词配置', path: '/prompts' },
     { icon: Box, label: '模型管理', path: '/models' },
+    { icon: ListFilter, label: '模型调用记录', path: '/model-logs' },
+    { icon: Info, label: '方案介绍', path: '/solutions' },
   ];
   return (
     <div className="w-64 bg-card border-r border-border h-screen flex flex-col justify-between shrink-0 sticky top-0 overflow-y-auto">

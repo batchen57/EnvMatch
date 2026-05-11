@@ -13,7 +13,12 @@
       "PowerShell(Get-Process *)",
       "PowerShell(Stop-Process *)",
       "Bash(uvicorn main:app --reload --port 8000)",
-      "Bash(npx tsc *)"
+      "Bash(npx tsc *)",
+      "Bash(uvicorn main:app --reload --port 8888)",
+      "PowerShell(uvicorn main:app *)",
+      "Bash(curl -s http://127.0.0.1:8888/tasks/?skip=0)",
+      "Bash(limit=1 2>&1)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:5173)"
     ]
   }
 }

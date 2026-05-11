@@ -24,7 +24,18 @@ app.add_middleware(
 STORAGE_DIR = "storage"
 os.makedirs(STORAGE_DIR, exist_ok=True)
 # Serve video files from storage directory
-app.mount("/storage", StaticFiles(directory=STORAGE_DIR), name="storage")
+class CORSStaticFiles(StaticFiles):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    async def get_response(self, path: str, scope):
+        response = await super().get_response(path, scope)
+        response.headers["Access-Control-Allow-Origin"] = "*"
+        response.headers["Access-Control-Allow-Methods"] = "GET, OPTIONS"
+        response.headers["Access-Control-Allow-Headers"] = "*"
+        return response
+
+app.mount("/storage", CORSStaticFiles(directory=STORAGE_DIR), name="storage")
 @app.post("/tasks/")
 async def create_task(
     background_tasks: BackgroundTasks,

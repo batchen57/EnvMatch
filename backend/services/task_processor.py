@@ -192,13 +192,33 @@ def analyze_with_vlm(frames_a: List[str], frames_b: List[str], prompt: str, api_
             "road_surface": d.get("road_surface", d.get("地面材质", 0))
         }
         raw_res["dimension_scores"] = mapped
-        return raw_res
+        
+        # 提取 Token 使用信息
+        usage = rj.get("usage", {})
+        
+        # MiniMax Native VLM 特殊处理：如果 usage 为空，尝试进行估算
+        if not usage and is_native_vlm:
+            # 输入：提示词长度 + 图像固定消耗 (MiniMax 约为 100-200)
+            # 输出：内容长度
+            prompt_tokens = len(vlm_prompt) // 2 + 150 
+            completion_tokens = len(ans) // 2
+            usage = {
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "total_tokens": prompt_tokens + completion_tokens,
+                "estimated": True
+            }
+        
+        return {"result": raw_res, "usage": usage}
     except Exception as e:
         print(f"VLM Analysis Error: {str(e)}")
         return {
-            "similarity_score": 0, 
-            "summary": f"分析失败: {str(e)}", 
-            "dimension_scores": {"lighting_weather":0,"architecture":0,"facilities":0,"vegetation":0,"road_surface":0},
+            "result": {
+                "similarity_score": 0, 
+                "summary": f"分析失败: {str(e)}", 
+                "dimension_scores": {"lighting_weather":0,"architecture":0,"facilities":0,"vegetation":0,"road_surface":0}
+            },
+            "usage": {},
             "error": str(e)
         }
 
@@ -222,7 +242,11 @@ def extract_frames(video_path: str, task_id: str, suffix: str, fps: int = 1, res
             cap.set(cv2.CAP_PROP_POS_FRAMES, p); ret, f = cap.read()
             if ret:
                 out = os.path.join(od, f"f_{p}.jpg")
-                cv2.imwrite(out, cv2.resize(f, (1280, 720)))
+                # 修复：回退方案也应遵循用户设定的分辨率，而非硬编码 1280x720
+                h, w = f.shape[:2]
+                target_h = resolution
+                target_w = int(w * (target_h / h))
+                cv2.imwrite(out, cv2.resize(f, (target_w, target_h)))
                 frames.append(out.replace("\\", "/"))
         cap.release()
     return sorted(list(set(frames)))
@@ -293,15 +317,48 @@ def process_video_task(task_id: str):
         else: tr.key_frames_a, tr.key_frames_b = fa, fb
         db.commit()
 
+        # 更新最终分析后的规格数据（反映实际提交给 AI 的分辨率和规模）
+        def get_payload_info(frames):
+            if not frames: return "0x0", 0.0
+            try:
+                # 获取第一帧的分辨率作为代表
+                first_frame = frames[0]
+                # 确保路径在 Windows 下能被 cv2 正确读取
+                abs_path = os.path.abspath(first_frame)
+                img = cv2.imread(abs_path)
+                if img is not None:
+                    res_str = f"{img.shape[1]}x{img.shape[0]}"
+                    # 计算所有帧的总大小 (MB)
+                    total_bytes = sum(os.path.getsize(os.path.abspath(f)) for f in frames if os.path.exists(os.path.abspath(f)))
+                    return res_str, round(total_bytes / 1024 / 1024, 2)
+                return "unknown", 0.0
+            except Exception as e:
+                print(f"Payload Info Error: {e}")
+                return "error", 0.0
+
+        res_a, size_a = get_payload_info(fa)
+        res_b, size_b = get_payload_info(fb)
+        
+        # 强制更新任务的分辨率信息
+        t.video_a_resolution = res_a
+        t.video_a_size = size_a
+        t.video_b_resolution = res_b
+        t.video_b_size = size_b
+        db.commit()
+        db.refresh(t)
+
         try:
             provider = cfg.provider if cfg else "Unknown"
-            air = analyze_with_vlm(fa, fb, t.prompt, key, url, t.model_id, provider)
+            vlm_response = analyze_with_vlm(fa, fb, t.prompt, key, url, t.model_id, provider)
+            air = vlm_response.get("result", {})
+            usage = vlm_response.get("usage", {})
             
             # 即使分析结果包含 error，也尝试更新部分数据
             t.similarity_score = air.get("similarity_score", 0)
-            usage = air.get("usage") or {}
-            t.input_tokens = usage.get("prompt_tokens", 500)
-            t.output_tokens = usage.get("completion_tokens", len(str(air)) // 2)
+            
+            # 更新 Token 统计 (优先使用 API 返回值，无则使用估算值)
+            t.input_tokens = usage.get("prompt_tokens", usage.get("input_tokens", 0))
+            t.output_tokens = usage.get("completion_tokens", usage.get("output_tokens", 0))
             
             tr = db.query(models.TaskResult).filter(models.TaskResult.task_id == task_id).first()
             if tr:
@@ -309,8 +366,12 @@ def process_video_task(task_id: str):
                 tr.similar_points = air.get("similar_points", [])
                 tr.difference_points = air.get("difference_points", [])
                 tr.summary = air.get("summary", "")
-                if air.get("error"):
-                    tr.error_message = air.get("error")
+                # 确保 TaskResult 中的数据也是最新校准过的
+                tr.input_tokens = t.input_tokens
+                tr.output_tokens = t.output_tokens
+                
+                if vlm_response.get("error"):
+                    tr.error_message = vlm_response.get("error")
                     t.status = models.TaskStatus.FAILED
                 else:
                     t.status = models.TaskStatus.COMPLETED

@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import ReactECharts from 'echarts-for-react';
-import { Download, Play, ArrowLeft, Video, Scan, Loader2, X, AlertCircle, Clock, Zap, FileText, Hash, Calendar, Layers, Minus, Plus, RotateCcw } from 'lucide-react';
+import { Download, Play, ArrowLeft, Video, Image, Scan, Loader2, X, AlertCircle, Clock, Zap, FileText, Hash, Calendar, Layers, Minus, Plus, RotateCcw } from 'lucide-react';
 import { domToPng } from 'modern-screenshot';
 import { jsPDF } from 'jspdf';
 import { cn } from '@/lib/utils';
@@ -153,7 +153,7 @@ export function ResultDetails() {
       <div><div class="lbl">创建时间</div><div class="val">${createdAt}</div></div>
       <div><div class="lbl">完成时间</div><div class="val">${updatedAt}</div></div>
       <div><div class="lbl">分析耗时</div><div class="val" style="font-size:15px;font-weight:600;color:#f1f5f9;">${duration}</div></div>
-      <div><div class="lbl">识别方式</div><div class="val" style="color:#60a5fa;">视频 LLM 识别</div></div>
+      <div><div class="lbl">识别方式</div><div class="val" style="color:#60a5fa;">${task.preprocess_options?.recognition_mode === 'image' ? '图像 LLM 识别' : '视频 LLM 识别'}</div></div>
       <div><div class="lbl">Token 用量</div><div class="val">输入 ${task.input_tokens || 0} / 输出 ${task.output_tokens || 0}</div></div>
     </div>
   </div>
@@ -361,92 +361,92 @@ export function ResultDetails() {
               <span className="text-xs text-primary mt-1">{isFailed ? '暂无评分' : '综合结果'}</span>
             </div>
           </div>
-          
+
           <h4 className="text-sm font-medium w-full mt-8 mb-4">评分分布</h4>
           <div className="w-full h-[240px] shrink-0 mb-4">
-             <ReactECharts ref={radarChartRef} option={radarOption} style={{ height: '100%' }} />
+            <ReactECharts ref={radarChartRef} option={radarOption} style={{ height: '100%' }} />
           </div>
           <div className="w-full space-y-2">
-             <ScoreRow label="光照/天气" val={dims.lighting_weather} />
-             <ScoreRow label="建筑风格" val={dims.architecture} />
-             <ScoreRow label="固定设施" val={dims.facilities} />
-             <ScoreRow label="植被绿化" val={dims.vegetation} />
-             <ScoreRow label="地面材质" val={dims.road_surface} />
+            <ScoreRow label="光照/天气" val={dims.lighting_weather} />
+            <ScoreRow label="建筑风格" val={dims.architecture} />
+            <ScoreRow label="固定设施" val={dims.facilities} />
+            <ScoreRow label="植被绿化" val={dims.vegetation} />
+            <ScoreRow label="地面材质" val={dims.road_surface} />
           </div>
         </div>
 
         {/* Middle: Video & Content */}
         <div className="flex-1 min-w-0 space-y-6">
-           <div>
-             <h4 className="text-sm font-medium mb-4">视频对比（关键帧对齐）</h4>
-             <div className="flex gap-4">
-               <div className="flex-1 bg-black aspect-video rounded-lg overflow-hidden border border-border/50">
-                 <video className="w-full h-full object-contain" controls src={`http://localhost:8888/storage/${(task.video_a_path || '').split('\\').pop()?.split('/').pop()}`} />
-               </div>
-               <div className="flex-1 bg-black aspect-video rounded-lg overflow-hidden border border-border/50">
-                 <video className="w-full h-full object-contain" controls src={`http://localhost:8888/storage/${(task.video_b_path || '').split('\\').pop()?.split('/').pop()}`} />
-               </div>
-             </div>
-           </div>
-
-           <div>
-             <h4 className="text-sm font-medium mb-4">环境要素抽取 (Keyframes)</h4>
-             <div className="space-y-2">
-               <div className="flex gap-2 overflow-x-auto pb-2 custom-scrollbar">
-                 {result?.key_frames_a?.map((kf: string, i: number) => {
-                   const url = `http://localhost:8888/${kf.replace(/\\/g, '/').replace(/^storage\//, 'storage/')}`;
-                   return (
-                     <img key={i} src={url} 
-                          crossOrigin="anonymous"
-                          className="w-24 aspect-video object-cover rounded border border-border hover:border-primary cursor-pointer transition-all"
-                          onClick={() => {
-                            setSelectedImg(url);
-                            setZoom(100);
-                            setPos({ x: 0, y: 0 });
-                          }} />
-                   );
-                 })}
-               </div>
-               <div className="flex gap-2 overflow-x-auto pb-2 custom-scrollbar">
-                 {result?.key_frames_b?.map((kf: string, i: number) => {
-                   const url = `http://localhost:8888/${kf.replace(/\\/g, '/').replace(/^storage\//, 'storage/')}`;
-                   return (
-                     <img key={i} src={url} 
-                          crossOrigin="anonymous"
-                          className="w-24 aspect-video object-cover rounded border border-border hover:border-primary cursor-pointer transition-all"
-                          onClick={() => {
-                            setSelectedImg(url);
-                            setZoom(100);
-                            setPos({ x: 0, y: 0 });
-                          }} />
-                   );
-                 })}
-               </div>
-             </div>
-           </div>
-
-           <div>
-             <h4 className="text-sm font-medium mb-4">AI 综合分析结论</h4>
-             <div className={cn("text-sm leading-relaxed p-4 rounded-lg border", isFailed ? "bg-red-500/5 text-red-500 border-red-500/10" : "bg-muted/20 border-border/50")}>
-                <div className="whitespace-pre-wrap">{result?.summary || "等待分析中..."}</div>
-             </div>
-             <div className="grid grid-cols-2 gap-4 mt-4">
-                <div className="bg-emerald-500/5 border border-emerald-500/10 p-3 rounded-lg">
-                  <h5 className="text-xs font-bold text-emerald-500 mb-2">相似点</h5>
-                  <ul className="text-xs space-y-1 list-disc list-inside opacity-80">{result?.similar_points?.map((p:string,i:number)=><li key={i}>{p}</li>)}</ul>
-                </div>
-                <div className="bg-amber-500/5 border border-amber-500/10 p-3 rounded-lg">
-                  <h5 className="text-xs font-bold text-amber-500 mb-2">差异点</h5>
-                  <ul className="text-xs space-y-1 list-disc list-inside opacity-80">{result?.difference_points?.map((p:string,i:number)=><li key={i}>{p}</li>)}</ul>
-                </div>
+          <div>
+            <h4 className="text-sm font-medium mb-4">视频对比（关键帧对齐）</h4>
+            <div className="flex gap-4">
+              <div className="flex-1 bg-black aspect-video rounded-lg overflow-hidden border border-border/50">
+                <video className="w-full h-full object-contain" controls src={`http://localhost:8888/storage/${(task.video_a_path || '').split('\\').pop()?.split('/').pop()}`} />
               </div>
-           </div>
+              <div className="flex-1 bg-black aspect-video rounded-lg overflow-hidden border border-border/50">
+                <video className="w-full h-full object-contain" controls src={`http://localhost:8888/storage/${(task.video_b_path || '').split('\\').pop()?.split('/').pop()}`} />
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <h4 className="text-sm font-medium mb-4">环境要素抽取 (Keyframes)</h4>
+            <div className="space-y-2">
+              <div className="flex gap-2 overflow-x-auto pb-2 custom-scrollbar">
+                {result?.key_frames_a?.map((kf: string, i: number) => {
+                  const url = `http://localhost:8888/${kf.replace(/\\/g, '/').replace(/^storage\//, 'storage/')}`;
+                  return (
+                    <img key={i} src={url}
+                      crossOrigin="anonymous"
+                      className="w-24 aspect-video object-cover rounded border border-border hover:border-primary cursor-pointer transition-all"
+                      onClick={() => {
+                        setSelectedImg(url);
+                        setZoom(100);
+                        setPos({ x: 0, y: 0 });
+                      }} />
+                  );
+                })}
+              </div>
+              <div className="flex gap-2 overflow-x-auto pb-2 custom-scrollbar">
+                {result?.key_frames_b?.map((kf: string, i: number) => {
+                  const url = `http://localhost:8888/${kf.replace(/\\/g, '/').replace(/^storage\//, 'storage/')}`;
+                  return (
+                    <img key={i} src={url}
+                      crossOrigin="anonymous"
+                      className="w-24 aspect-video object-cover rounded border border-border hover:border-primary cursor-pointer transition-all"
+                      onClick={() => {
+                        setSelectedImg(url);
+                        setZoom(100);
+                        setPos({ x: 0, y: 0 });
+                      }} />
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <h4 className="text-sm font-medium mb-4">AI 综合分析结论</h4>
+            <div className={cn("text-sm leading-relaxed p-4 rounded-lg border", isFailed ? "bg-red-500/5 text-red-500 border-red-500/10" : "bg-muted/20 border-border/50")}>
+              <div className="whitespace-pre-wrap">{result?.summary || "等待分析中..."}</div>
+            </div>
+            <div className="grid grid-cols-2 gap-4 mt-4">
+              <div className="bg-emerald-500/5 border border-emerald-500/10 p-3 rounded-lg">
+                <h5 className="text-xs font-bold text-emerald-500 mb-2">相似点</h5>
+                <ul className="text-xs space-y-1 list-disc list-inside opacity-80">{result?.similar_points?.map((p: string, i: number) => <li key={i}>{p}</li>)}</ul>
+              </div>
+              <div className="bg-amber-500/5 border border-amber-500/10 p-3 rounded-lg">
+                <h5 className="text-xs font-bold text-amber-500 mb-2">差异点</h5>
+                <ul className="text-xs space-y-1 list-disc list-inside opacity-80">{result?.difference_points?.map((p: string, i: number) => <li key={i}>{p}</li>)}</ul>
+              </div>
+            </div>
+          </div>
         </div>
 
         {/* Right: Basics (Redesigned according to mockup) */}
         <div className="w-[300px] flex flex-col pl-4 border-l border-border/30 shrink-0">
           <h4 className="text-sm font-bold mb-4 text-foreground/90">基本信息</h4>
-          
+
           <div className="bg-[#0b0f1a] rounded-xl p-5 border border-white/5 space-y-5 shadow-2xl">
             {/* Top Section: Task Info */}
             <div className="space-y-4">
@@ -480,7 +480,15 @@ export function ResultDetails() {
               <div className="space-y-1">
                 <div className="text-[11px] text-muted-foreground/60">识别方式:</div>
                 <div className="flex items-center gap-1.5 text-blue-400 font-medium text-[13px]">
-                  <Video className="w-4 h-4" /> 视频 LLM 识别
+                  {task.preprocess_options?.recognition_mode === 'image' ? (
+                    <>
+                      <Image className="w-4 h-4" /> 图像 LLM 识别
+                    </>
+                  ) : (
+                    <>
+                      <Video className="w-4 h-4" /> 视频 LLM 识别
+                    </>
+                  )}
                 </div>
               </div>
             </div>
@@ -513,15 +521,15 @@ export function ResultDetails() {
             <div className="space-y-2.5">
               <div className="flex justify-between items-center text-[12px]">
                 <div className="flex items-center gap-1.5">
-                   <div className="w-1 h-1 rounded-full bg-blue-500/50" />
-                   <span className="text-muted-foreground/60">输入 Token:</span>
+                  <div className="w-1 h-1 rounded-full bg-blue-500/50" />
+                  <span className="text-muted-foreground/60">输入 Token:</span>
                 </div>
                 <span className="text-foreground font-bold font-mono">{task.input_tokens || 0}</span>
               </div>
               <div className="flex justify-between items-center text-[12px]">
                 <div className="flex items-center gap-1.5">
-                   <div className="w-1 h-1 rounded-full bg-emerald-500/50" />
-                   <span className="text-muted-foreground/60">输出 Token:</span>
+                  <div className="w-1 h-1 rounded-full bg-emerald-500/50" />
+                  <span className="text-muted-foreground/60">输出 Token:</span>
                 </div>
                 <span className="text-foreground font-bold font-mono">{task.output_tokens || 0}</span>
               </div>
@@ -529,17 +537,17 @@ export function ResultDetails() {
           </div>
         </div>
       </div>
-      
+
       <AnimatePresence>
         {selectedImg && (
-          <motion.div 
+          <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             className="fixed inset-0 bg-black/80 backdrop-blur-md z-[100000] flex items-center justify-center p-8"
             onClick={() => setSelectedImg(null)}
           >
-            <motion.div 
+            <motion.div
               ref={previewRef}
               initial={{ scale: 0.9, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
@@ -550,7 +558,7 @@ export function ResultDetails() {
               {/* Header */}
               <div className="flex items-center justify-between px-6 py-4 border-b border-white/5">
                 <div className="flex items-center gap-3">
-                  <button 
+                  <button
                     onClick={toggleFullScreen}
                     className="p-2 bg-blue-500/10 rounded-lg hover:bg-blue-500/20 transition-colors cursor-pointer group"
                     title="全屏展示"
@@ -562,32 +570,32 @@ export function ResultDetails() {
                     <div className="text-[10px] text-white/40 tracking-wider">KEYFRAME DETAIL VIEW</div>
                   </div>
                 </div>
-                
+
                 <div className="flex items-center gap-4">
                   <div className="flex items-center gap-2 bg-white/5 px-3 py-1 rounded-full border border-white/5">
-                    <button 
-                      onClick={() => setZoom(z => Math.max(20, z - 10))} 
+                    <button
+                      onClick={() => setZoom(z => Math.max(20, z - 10))}
                       className="p-1 hover:text-white text-white/50 transition-colors"
                     >
                       <Minus className="w-4 h-4" />
                     </button>
                     <span className="text-xs font-mono text-white/80 w-12 text-center">{zoom}%</span>
-                    <button 
-                      onClick={() => setZoom(z => Math.min(500, z + 10))} 
+                    <button
+                      onClick={() => setZoom(z => Math.min(500, z + 10))}
                       className="p-1 hover:text-white text-white/50 transition-colors"
                     >
                       <Plus className="w-4 h-4" />
                     </button>
                   </div>
-                  <button 
-                    onClick={() => { setZoom(100); setPos({x:0, y:0}); }} 
+                  <button
+                    onClick={() => { setZoom(100); setPos({ x: 0, y: 0 }); }}
                     className="p-2 hover:bg-white/5 rounded-full text-white/50 hover:text-white transition-colors"
                   >
                     <RotateCcw className="w-4 h-4" />
                   </button>
                   <div className="w-px h-4 bg-white/10 mx-1" />
-                  <button 
-                    onClick={() => setSelectedImg(null)} 
+                  <button
+                    onClick={() => setSelectedImg(null)}
                     className="p-2 hover:bg-red-500/10 rounded-full text-white/50 hover:text-red-400 transition-colors"
                   >
                     <X className="w-5 h-5" />
@@ -596,30 +604,30 @@ export function ResultDetails() {
               </div>
 
               {/* Content */}
-              <div 
+              <div
                 className="flex-1 relative overflow-hidden bg-[#0a0d14] flex items-center justify-center cursor-grab active:cursor-grabbing"
                 onWheel={(e) => {
                   const delta = e.deltaY > 0 ? -10 : 10;
                   setZoom(z => Math.min(500, Math.max(20, z + delta)));
                 }}
               >
-                 <motion.img 
-                   src={selectedImg} 
-                   animate={{ 
-                     scale: zoom / 100,
-                     x: pos.x,
-                     y: pos.y
-                   }}
-                   transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-                   drag
-                   onDrag={(e, info) => {
-                     setPos(prev => ({
-                       x: prev.x + info.delta.x,
-                       y: prev.y + info.delta.y
-                     }));
-                   }}
-                   className="max-w-[90%] max-h-[90%] object-contain shadow-2xl pointer-events-none select-none"
-                 />
+                <motion.img
+                  src={selectedImg}
+                  animate={{
+                    scale: zoom / 100,
+                    x: pos.x,
+                    y: pos.y
+                  }}
+                  transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+                  drag
+                  onDrag={(e, info) => {
+                    setPos(prev => ({
+                      x: prev.x + info.delta.x,
+                      y: prev.y + info.delta.y
+                    }));
+                  }}
+                  className="max-w-[90%] max-h-[90%] object-contain shadow-2xl pointer-events-none select-none"
+                />
               </div>
 
               {/* Footer */}
@@ -627,7 +635,7 @@ export function ResultDetails() {
                 <div className="text-[11px] text-white/40 italic flex items-center gap-2">
                   提示: 滚轮可缩放，放大后可鼠标拖动查看详情
                 </div>
-                <button 
+                <button
                   onClick={() => setSelectedImg(null)}
                   className="px-6 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-medium transition-all shadow-lg shadow-blue-600/20"
                 >

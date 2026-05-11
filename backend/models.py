@@ -3,6 +3,7 @@ from sqlalchemy import Column, String, Float, DateTime, Enum, JSON, ForeignKey
 from sqlalchemy.sql import func
 from database import Base
 import enum
+import datetime
 class TaskStatus(str, enum.Enum):
     PENDING = "PENDING"
     PROCESSING = "PROCESSING"
@@ -20,8 +21,8 @@ class Task(Base):
     similarity_score = Column(Float, nullable=True)
     model_id = Column(String, nullable=True)
     prompt = Column(String, nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    created_at = Column(DateTime, default=datetime.datetime.now)
+    updated_at = Column(DateTime, default=datetime.datetime.now, onupdate=datetime.datetime.now)
     input_tokens = Column(Float, nullable=True)
     output_tokens = Column(Float, nullable=True)
     
@@ -38,8 +39,8 @@ class PromptTemplate(Base):
     id = Column(String(36), primary_key=True, default=generate_uuid, index=True)
     name = Column(String, index=True)
     content = Column(String)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    created_at = Column(DateTime, default=datetime.datetime.now)
+    updated_at = Column(DateTime, default=datetime.datetime.now, onupdate=datetime.datetime.now)
 class AIModel(Base):
     __tablename__ = "ai_models"
     id = Column(String(36), primary_key=True, default=generate_uuid, index=True)
@@ -52,8 +53,8 @@ class AIModel(Base):
     capabilities = Column(JSON, nullable=True) # e.g., ["text", "image", "video"]
     is_default = Column(String, default="false")
     sort_order = Column(Float, default=0.0)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    created_at = Column(DateTime, default=datetime.datetime.now)
+    updated_at = Column(DateTime, default=datetime.datetime.now, onupdate=datetime.datetime.now)
 class TaskResult(Base):
     __tablename__ = "task_results"
     task_id = Column(String(36), ForeignKey("tasks.id"), primary_key=True)

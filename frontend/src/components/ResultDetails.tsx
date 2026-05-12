@@ -1,11 +1,11 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import ReactECharts from 'echarts-for-react';
-import { Download, Play, ArrowLeft, Video, Image, Scan, Loader2, X, AlertCircle, Clock, Zap, FileText, Hash, Calendar, Layers, Minus, Plus, RotateCcw } from 'lucide-react';
+import { Download, Play, ArrowLeft, Video, Image, Scan, Loader2, X, AlertCircle, Clock, Zap, FileText, Hash, Calendar, Layers, Minus, Plus, RotateCcw, ChevronLeft, ChevronRight } from 'lucide-react';
 import { domToPng } from 'modern-screenshot';
 import { jsPDF } from 'jspdf';
 import { cn } from '@/lib/utils';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence, useDragControls } from 'framer-motion';
 
 export function ResultDetails() {
   const navigate = useNavigate();
@@ -20,6 +20,7 @@ export function ResultDetails() {
   const previewRef = useRef<HTMLDivElement>(null);
   const ringChartRef = useRef<any>(null);
   const radarChartRef = useRef<any>(null);
+  const dragControls = useDragControls();
 
   const toggleFullScreen = () => {
     if (!previewRef.current) return;
@@ -46,6 +47,49 @@ export function ResultDetails() {
       });
   }, [id]);
 
+  const mkImgUrl = (path: string | undefined) => {
+    if (!path) return '';
+    return `http://localhost:8888/${path.replace(/\\/g, '/').replace(/^storage\//, 'storage/')}`;
+  };
+
+  // 获取所有关键帧用于切换
+  const allKeyframes = data ? [
+    ...(data.result?.key_frames_a || []),
+    ...(data.result?.key_frames_b || [])
+  ].map(kf => mkImgUrl(kf)) : [];
+
+  const currentIndex = selectedImg ? allKeyframes.indexOf(selectedImg) : -1;
+
+  const handlePrev = (e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    if (currentIndex > 0) {
+      setSelectedImg(allKeyframes[currentIndex - 1]);
+      setZoom(100);
+      setPos({ x: 0, y: 0 });
+    }
+  };
+
+  const handleNext = (e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    if (currentIndex < allKeyframes.length - 1) {
+      setSelectedImg(allKeyframes[currentIndex + 1]);
+      setZoom(100);
+      setPos({ x: 0, y: 0 });
+    }
+  };
+
+  // 键盘快捷键监听
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (!selectedImg) return;
+      if (e.key === 'ArrowLeft') handlePrev();
+      if (e.key === 'ArrowRight') handleNext();
+      if (e.key === 'Escape') setSelectedImg(null);
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectedImg, currentIndex]);
+
   const waitForImages = (container: HTMLElement): Promise<void> => {
     const images = container.querySelectorAll('img');
     return Promise.all(
@@ -61,11 +105,6 @@ export function ResultDetails() {
         });
       })
     );
-  };
-
-  const mkImgUrl = (path: string | undefined) => {
-    if (!path) return '';
-    return `http://localhost:8888/${path.replace(/\\/g, '/').replace(/^storage\//, 'storage/')}`;
   };
 
   const handleExport = async () => {
@@ -550,15 +589,22 @@ export function ResultDetails() {
             onClick={() => setSelectedImg(null)}
           >
             <motion.div
-              ref={previewRef}
+              layout
+              drag
+              dragControls={dragControls}
+              dragListener={false}
+              dragMomentum={false}
               initial={{ scale: 0.9, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.9, opacity: 0 }}
-              className="bg-[#1a1f2e]/95 border border-white/10 rounded-2xl w-full max-w-5xl h-[85vh] flex flex-col overflow-hidden shadow-2xl"
+              className="bg-[#1a1f2e]/95 border border-white/10 rounded-2xl w-full max-w-5xl h-[85vh] flex flex-col overflow-hidden shadow-2xl relative"
               onClick={(e) => e.stopPropagation()}
             >
               {/* Header */}
-              <div className="flex items-center justify-between px-6 py-4 border-b border-white/5">
+              <div 
+                onPointerDown={(e) => dragControls.start(e)}
+                className="flex items-center justify-between px-6 py-4 border-b border-white/5 cursor-move select-none"
+              >
                 <div className="flex items-center gap-3">
                   <button
                     onClick={toggleFullScreen}
@@ -607,13 +653,23 @@ export function ResultDetails() {
 
               {/* Content */}
               <div
-                className="flex-1 relative overflow-hidden bg-[#0a0d14] flex items-center justify-center cursor-grab active:cursor-grabbing"
+                className="flex-1 relative overflow-hidden bg-[#0a0d14] flex items-center justify-center group"
                 onWheel={(e) => {
                   const delta = e.deltaY > 0 ? -10 : 10;
                   setZoom(z => Math.min(500, Math.max(20, z + delta)));
                 }}
               >
+                {/* Navigation Arrows */}
+                <button 
+                  onClick={handlePrev}
+                  disabled={currentIndex <= 0}
+                  className="absolute left-4 z-10 p-3 rounded-full bg-black/40 text-white/70 hover:bg-black/60 hover:text-white disabled:opacity-0 transition-all border border-white/5"
+                >
+                  <ChevronLeft className="w-8 h-8" />
+                </button>
+
                 <motion.img
+                  key={selectedImg}
                   src={selectedImg}
                   animate={{
                     scale: zoom / 100,
@@ -630,12 +686,22 @@ export function ResultDetails() {
                   }}
                   className="max-w-[90%] max-h-[90%] object-contain shadow-2xl pointer-events-none select-none"
                 />
+
+                <button 
+                  onClick={handleNext}
+                  disabled={currentIndex >= allKeyframes.length - 1}
+                  className="absolute right-4 z-10 p-3 rounded-full bg-black/40 text-white/70 hover:bg-black/60 hover:text-white disabled:opacity-0 transition-all border border-white/5"
+                >
+                  <ChevronRight className="w-8 h-8" />
+                </button>
               </div>
 
               {/* Footer */}
               <div className="px-6 py-4 flex items-center justify-between border-t border-white/5 bg-[#1a1f2e]/50 backdrop-blur-sm">
-                <div className="text-[11px] text-white/40 italic flex items-center gap-2">
-                  提示: 滚轮可缩放，放大后可鼠标拖动查看详情
+                <div className="text-[11px] text-white/40 italic flex items-center gap-4">
+                  <div className="flex items-center gap-1"><Zap className="w-3 h-3" /> 滚轮可缩放</div>
+                  <div className="flex items-center gap-1"><Layers className="w-3 h-3" /> 方向键可切换 (←/→)</div>
+                  <div className="text-blue-400/60 font-bold ml-2">当前: {currentIndex + 1} / {allKeyframes.length}</div>
                 </div>
                 <button
                   onClick={() => setSelectedImg(null)}

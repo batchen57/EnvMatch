@@ -424,69 +424,130 @@ def analyze_with_vlm(frames_a: List[str], frames_b: List[str], prompt: str, api_
 
 def extract_frames(video_path: str, task_id: str, suffix: str, fps: int = 1, resolution: int = 720, denoise: bool = False, sampling_type: str = "fixed"):
     od = os.path.join("storage", f"{task_id}_{suffix}_frames"); os.makedirs(od, exist_ok=True)
-    frames = []; vp = video_path.replace("\\", "/"); op = os.path.join(od, "frame_%03d.jpg").replace("\\", "/")
+    frames = []
+    vp = video_path.replace("\\", "/")
+    op = os.path.join(od, "frame_%03d.jpg").replace("\\", "/")
+    
+    print(f"DEBUG: Starting frame extraction for {suffix} (Type: {sampling_type})")
+    
     try:
         if sampling_type == "perceptual":
             frames = extract_perceptual_frames(vp, od, resolution)
+            print(f"DEBUG: Perceptual extraction found {len(frames)} frames")
         else:
             fs = f"fps={fps},scale=-1:{resolution}"
             ffmpeg.input(vp).output(op, vf=fs, qscale=2).overwrite_output().run(capture_stdout=True, capture_stderr=True)
             for fn in sorted(os.listdir(od)):
-                if fn.endswith(".jpg"): frames.append(os.path.join(od, fn).replace("\\", "/"))
-    except: pass
+                if fn.startswith("frame_") and fn.endswith(".jpg"):
+                    frames.append(os.path.join(od, fn).replace("\\", "/"))
+            print(f"DEBUG: Fixed sampling extracted {len(frames)} frames")
+    except Exception as e:
+        print(f"DEBUG: Extraction Error: {e}")
         
-    if len(frames) < 3:
+    # 如果抽帧数量不足 5 帧，强制补充到至少 5 帧，确保详情页有基础展示
+    if len(frames) < 5:
+        import random
+        print(f"DEBUG: Frames insufficient ({len(frames)}), applying 5-frame fallback logic")
         cap = cv2.VideoCapture(video_path)
         tot = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        for p in [0, tot//2, int(tot*0.9)]:
-            cap.set(cv2.CAP_PROP_POS_FRAMES, p); ret, f = cap.read()
-            if ret:
-                out = os.path.join(od, f"f_{p}.jpg")
-                # 修复：回退方案也应遵循用户设定的分辨率，而非硬编码 1280x720
-                h, w = f.shape[:2]
-                target_h = resolution
-                target_w = int(w * (target_h / h))
-                cv2.imwrite(out, cv2.resize(f, (target_w, target_h)))
-                frames.append(out.replace("\\", "/"))
+        if tot > 0:
+            # 均匀采样 5 个点，并加入微量随机扰动，使两个视频的抽帧点在视觉上不完全一致
+            jitter_range = max(1, tot // 50)
+            fallback_indices = []
+            for i in range(5):
+                base_idx = int(tot * i / 4)
+                # 避开首尾的极端情况，加入随机偏移
+                offset = random.randint(-jitter_range, jitter_range) if i > 0 and i < 4 else 0
+                idx = max(0, min(tot - 1, base_idx + offset))
+                fallback_indices.append(idx)
+            
+            for idx in fallback_indices:
+                cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
+                ret, f = cap.read()
+                if ret:
+                    out_name = f"fallback_{idx:06d}.jpg"
+                    out_path = os.path.join(od, out_name)
+                    h, w = f.shape[:2]
+                    target_h = resolution
+                    target_w = int(w * (target_h / h))
+                    cv2.imwrite(out_path, cv2.resize(f, (target_w, target_h)))
+                    frames.append(out_path.replace("\\", "/"))
         cap.release()
-    return sorted(list(set(frames)))
+    
+    final_frames = sorted(list(set(frames)))
+    print(f"DEBUG: Final frame count for {suffix}: {len(final_frames)}")
+    return final_frames
 
 def extract_perceptual_frames(video_path: str, output_dir: str, resolution: int = 720):
     from scenedetect import open_video, SceneManager, ContentDetector
     frames = []
     try:
-        v = open_video(video_path); sm = SceneManager(); sm.add_detector(ContentDetector(threshold=24.0)); sm.detect_scenes(v)
+        v = open_video(video_path)
+        sm = SceneManager()
+        # 极高灵敏度配置
+        sm.add_detector(ContentDetector(threshold=15.0))
+        sm.detect_scenes(v)
         si = [s[0].get_frames() for s in sm.get_scene_list()]
-    except: si = []
+    except Exception as e:
+        print(f"DEBUG: SceneDetect failed or not installed: {e}")
+        si = []
+
     cap = cv2.VideoCapture(video_path)
-    fps, tot = cap.get(cv2.CAP_PROP_FPS) or 25, int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    fps = cap.get(cv2.CAP_PROP_FPS) or 25
+    tot = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     ret, pf = cap.read()
-    if not ret: return []
+    if not ret: 
+        cap.release()
+        return []
+        
     pg = cv2.cvtColor(pf, cv2.COLOR_BGR2GRAY)
     curr, am, fi, p0 = 0, 0, {0}, cv2.goodFeaturesToTrack(pg, None, 100, 0.3, 7, 7)
-    step = max(1, int(fps / 2))
+    # 加密采样频率 (fps/4)
+    step = max(1, int(fps / 4))
+    
     while curr + step < tot:
-        curr += step; cap.set(cv2.CAP_PROP_POS_FRAMES, curr); ret, f = cap.read()
+        curr += step
+        cap.set(cv2.CAP_PROP_POS_FRAMES, curr)
+        ret, f = cap.read()
         if not ret: break
         g = cv2.cvtColor(f, cv2.COLOR_BGR2GRAY)
+        
+        # 定期刷新特征点
+        if curr % (int(fps) * 2) == 0:
+            p0 = cv2.goodFeaturesToTrack(g, None, 100, 0.3, 7, 7)
+            pg = g.copy()
+            continue
+
         if p0 is not None:
             p1, st, _ = cv2.calcOpticalFlowPyrLK(pg, g, p0, None)
             if p1 is not None and len(p1[st==1]) > 0:
                 dist = np.median(np.linalg.norm(p1[st==1] - p0[st==1], axis=1))
                 am += dist
-                if am > (f.shape[1] * 0.15): # 进一步灵敏
-                    fi.add(curr); am = 0; p0 = cv2.goodFeaturesToTrack(g, None, 100, 0.3, 7, 7)
-                else: p0 = p1[st==1].reshape(-1, 1, 2)
+                # 灵敏度阈值从 0.08 进一步下调至 0.05
+                if am > (f.shape[1] * 0.05):
+                    fi.add(curr)
+                    am = 0
+                    p0 = cv2.goodFeaturesToTrack(g, None, 100, 0.3, 7, 7)
+                else:
+                    p0 = p1[st==1].reshape(-1, 1, 2)
         pg = g.copy()
+    
     cap.release()
+    
     sel = sorted(list(fi.union(set(si))))
-    if len(sel) > 15: s = len(sel)//15; sel = sel[::s][:15]
+    # 最多保留 20 帧
+    if len(sel) > 20:
+        s = len(sel) // 20
+        sel = sel[::s][:20]
+        
     cap = cv2.VideoCapture(video_path)
     for idx in sel:
-        cap.set(cv2.CAP_PROP_POS_FRAMES, idx); ret, f = cap.read()
+        cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
+        ret, f = cap.read()
         if ret:
             fr = cv2.resize(f, (int(f.shape[1]*(resolution/f.shape[0])), resolution))
-            out = os.path.join(output_dir, f"p_{idx:05d}.jpg"); cv2.imwrite(out, fr)
+            out = os.path.join(output_dir, f"p_{idx:06d}.jpg")
+            cv2.imwrite(out, fr)
             frames.append(out.replace("\\", "/"))
     cap.release()
     return sorted(frames)

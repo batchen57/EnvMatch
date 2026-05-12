@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Search, ChevronLeft, ChevronRight, Loader2, Eye, Calendar, Cpu, Link2, FileJson, Info, X, Clock } from 'lucide-react';
+import { Search, ChevronLeft, ChevronRight, ChevronDown, Loader2, Eye, Calendar, Cpu, Link2, FileJson, Info, X, Clock } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { motion, AnimatePresence, useDragControls } from 'framer-motion';
 
@@ -485,9 +485,9 @@ export function ModelLogs() {
                 </div>
               </div>
               <div className="p-6 overflow-auto custom-scrollbar flex-1 bg-black/20">
-                <pre className="text-sm font-mono text-blue-100/90 leading-relaxed">
-                  {JSON.stringify(autoParseJson(jsonView.data), null, 2)}
-                </pre>
+                <div className="text-sm font-mono leading-relaxed p-2">
+                  <JsonView data={autoParseJson(jsonView.data)} />
+                </div>
               </div>
               
               {!isJsonFullScreen && (
@@ -500,6 +500,71 @@ export function ModelLogs() {
           </div>
         )}
       </AnimatePresence>
+    </div>
+  );
+}
+
+function JsonView({ data, isLast = true }: { data: any, isLast?: boolean }) {
+  const [collapsed, setCollapsed] = useState(false);
+
+  if (data === null) return <span className="text-gray-500">null{!isLast && ","}</span>;
+  if (typeof data === "boolean") return <span className="text-purple-400">{data.toString()}{!isLast && ","}</span>;
+  if (typeof data === "number") return <span className="text-amber-400">{data}{!isLast && ","}</span>;
+  if (typeof data === "string") {
+    // 检查是否是多行，如果是多行则特殊处理一下换行
+    const isMultiline = data.includes('\n');
+    return (
+      <span className="text-emerald-400 break-words">
+        "{isMultiline ? data.replace(/\n/g, '↵') : data}"{!isLast && ","}
+      </span>
+    );
+  }
+
+  const isArray = Array.isArray(data);
+  const keys = isArray ? data : Object.keys(data);
+  const isEmpty = isArray ? data.length === 0 : keys.length === 0;
+
+  if (isEmpty) return <span className="text-blue-300/80">{isArray ? "[]" : "{}"}{!isLast && ","}</span>;
+
+  return (
+    <div className="inline-block align-top">
+      <div 
+        className="cursor-pointer hover:bg-white/5 px-1 -ml-1 rounded transition-colors inline-flex items-center gap-1 select-none"
+        onClick={(e) => { e.stopPropagation(); setCollapsed(!collapsed); }}
+      >
+        {collapsed ? <ChevronRight className="w-3.5 h-3.5 text-white/40" /> : <ChevronDown className="w-3.5 h-3.5 text-white/40" />}
+        <span className="text-blue-300/80 font-bold">{isArray ? "[" : "{"}</span>
+        {collapsed && (
+          <span className="px-1.5 py-0.5 bg-white/5 rounded text-[10px] text-white/40 font-sans mx-1">
+             {isArray ? `${data.length} items` : `${keys.length} keys`}
+          </span>
+        )}
+      </div>
+
+      {!collapsed && (
+        <div className="pl-6 border-l border-white/5 my-0.5 ml-1.5">
+          {isArray ? (
+            data.map((item: any, i: number) => (
+              <div key={i} className="py-0.5">
+                <JsonView data={item} isLast={i === data.length - 1} />
+              </div>
+            ))
+          ) : (
+            Object.keys(data).map((key, i, arr) => (
+              <div key={key} className="flex gap-2 py-0.5">
+                <span className="text-blue-400/90 font-medium shrink-0">"{key}":</span>
+                <JsonView data={data[key]} isLast={i === arr.length - 1} />
+              </div>
+            ))
+          )}
+        </div>
+      )}
+      
+      {!collapsed ? (
+        <div className="text-blue-300/80 font-bold">{isArray ? "]" : "}"}{!isLast && ","}</div>
+      ) : (
+        <span className="text-blue-300/80 font-bold">{isArray ? "]" : "}"}{!isLast && ","}</span>
+      )}
     </div>
   );
 }

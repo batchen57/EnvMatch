@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Search, ChevronLeft, ChevronRight, Loader2, Eye, Calendar, Cpu, Link2, FileJson, Info, X, Clock } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence, useDragControls } from 'framer-motion';
 
 export function ModelLogs() {
   const [logs, setLogs] = useState<any[]>([]);
@@ -14,6 +14,121 @@ export function ModelLogs() {
   const [jsonView, setJsonView] = useState<{data: any, title: string} | null>(null);
   const [isJsonFullScreen, setIsJsonFullScreen] = useState(false);
   const [copyStatus, setCopyStatus] = useState(false);
+  const controls = useDragControls();
+
+  // 自动尝试递归解析 JSON 字符串，支持转义嵌套、Markdown 代码块以及字符串中嵌入的 JSON 块
+  const autoParseJson = (data: any): any => {
+    if (!data) return data;
+    
+    if (typeof data === 'string') {
+      let s = data.trim();
+      
+      // 1. 处理可能的 Markdown 代码块包裹 (常见的 LLM 输出格式)
+      if (s.includes('```')) {
+        const mdJsonRegex = /```(?:json)?\s*([\s\S]*?)\s*```/i;
+        const match = s.match(mdJsonRegex);
+        if (match && match[1]) {
+          s = match[1].trim();
+        }
+      }
+
+      // 2. 尝试全量解析标准的 JSON 对象或数组
+      if ((s.startsWith('{') && s.endsWith('}')) || (s.startsWith('[') && s.endsWith(']'))) {
+        try {
+          const parsed = JSON.parse(s);
+          return autoParseJson(parsed);
+        } catch (e) {
+          // 继续尝试下方的“智能提取”逻辑
+        }
+      }
+
+      // 3. 智能提取：如果字符串中包含 JSON 块 (即使不是全量 JSON)
+      // 常见于 Prompt 中包含的示例或指令
+      const extractJsonBlocks = (text: string) => {
+        const blocks: {start: number, end: number, parsed: any}[] = [];
+        let pos = 0;
+        while (pos < text.length) {
+          const start = text.indexOf('{', pos);
+          const startArr = text.indexOf('[', pos);
+          const actualStart = (start !== -1 && (startArr === -1 || start < startArr)) ? start : startArr;
+          
+          if (actualStart === -1) break;
+          
+          let depth = 0;
+          let end = -1;
+          const openChar = text[actualStart];
+          const closeChar = openChar === '{' ? '}' : ']';
+
+          for (let i = actualStart; i < text.length; i++) {
+            if (text[i] === openChar) depth++;
+            else if (text[i] === closeChar) {
+              depth--;
+              if (depth === 0) {
+                end = i;
+                break;
+              }
+            }
+          }
+          
+          if (end !== -1) {
+            const candidate = text.substring(actualStart, end + 1);
+            try {
+              // 验证是否为合法 JSON
+              const parsed = JSON.parse(candidate);
+              // 过滤掉太简单的内容（如只有数字或简单的空对象，除非它确实是 JSON）
+              if (candidate.length > 4) {
+                blocks.push({ start: actualStart, end, parsed });
+                pos = end + 1;
+                continue;
+              }
+            } catch (e) {}
+          }
+          pos = actualStart + 1;
+        }
+        return blocks;
+      };
+
+      const foundBlocks = extractJsonBlocks(s);
+      if (foundBlocks.length > 0) {
+        const result: any[] = [];
+        let lastPos = 0;
+        foundBlocks.forEach(block => {
+          if (block.start > lastPos) {
+            const textPart = s.substring(lastPos, block.start).trim();
+            if (textPart) result.push(textPart);
+          }
+          result.push(autoParseJson(block.parsed));
+          lastPos = block.end + 1;
+        });
+        if (lastPos < s.length) {
+          const tail = s.substring(lastPos).trim();
+          if (tail) result.push(tail);
+        }
+        return result.length === 1 ? result[0] : result;
+      }
+      
+      // 4. 处理可能被多重转义包裹的单字符串
+      if (s.startsWith('"') && s.endsWith('"') && s.length > 2) {
+        try {
+          const unquoted = JSON.parse(s);
+          if (typeof unquoted === 'string' && unquoted !== s) {
+            return autoParseJson(unquoted);
+          }
+        } catch (e) {}
+      }
+    } else if (typeof data === 'object' && data !== null) {
+      if (Array.isArray(data)) {
+        return data.map(item => autoParseJson(item));
+      } else {
+        const result: any = {};
+        for (const key in data) {
+          result[key] = autoParseJson(data[key]);
+        }
+        return result;
+      }
+    }
+    return data;
+  };
 
   const fetchLogs = async () => {
     setLoading(true);
@@ -302,6 +417,8 @@ export function ModelLogs() {
             <motion.div
               layout
               drag={!isJsonFullScreen}
+              dragControls={controls}
+              dragListener={false}
               dragMomentum={false}
               initial={{ scale: 0.95, opacity: 0 }}
               animate={{ 
@@ -323,9 +440,11 @@ export function ModelLogs() {
               style={{
                 maxWidth: isJsonFullScreen ? "100vw" : "95%",
                 maxHeight: isJsonFullScreen ? "100vh" : "90%",
+                touchAction: "none"
               }}
             >
               <div 
+                onPointerDown={(e) => !isJsonFullScreen && controls.start(e)}
                 className={cn(
                   "px-6 py-4 border-b border-white/5 flex items-center justify-between bg-white/5 select-none",
                   !isJsonFullScreen ? "cursor-move" : "cursor-default"
@@ -367,7 +486,7 @@ export function ModelLogs() {
               </div>
               <div className="p-6 overflow-auto custom-scrollbar flex-1 bg-black/20">
                 <pre className="text-sm font-mono text-blue-100/90 leading-relaxed">
-                  {JSON.stringify(jsonView.data, null, 2)}
+                  {JSON.stringify(autoParseJson(jsonView.data), null, 2)}
                 </pre>
               </div>
               

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Search, ChevronLeft, ChevronRight, ChevronDown, Loader2, Eye, Calendar, Cpu, Link2, FileJson, Info, X, Clock } from 'lucide-react';
+import { Search, ChevronLeft, ChevronRight, ChevronDown, Loader2, Eye, Calendar, Cpu, Link2, FileJson, Info, X, Clock, Image as ImageIcon, ZoomIn, ZoomOut, RotateCcw, Maximize2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { motion, AnimatePresence, useDragControls } from 'framer-motion';
 
@@ -12,6 +12,9 @@ export function ModelLogs() {
   const [limit] = useState(10);
   const [selectedLog, setSelectedLog] = useState<any>(null);
   const [jsonView, setJsonView] = useState<{data: any, title: string} | null>(null);
+  const [imageView, setImageView] = useState<{images: string[], title: string} | null>(null);
+  const [focusedImgIdx, setFocusedImgIdx] = useState(0);
+  const [zoom, setZoom] = useState(1);
   const [isJsonFullScreen, setIsJsonFullScreen] = useState(false);
   const [copyStatus, setCopyStatus] = useState(false);
   const controls = useDragControls();
@@ -130,6 +133,44 @@ export function ModelLogs() {
     return data;
   };
 
+  // 提取 Payload 中的 Base64 图片
+  const extractBase64Images = (data: any): string[] => {
+    const images: string[] = [];
+    
+    const search = (obj: any) => {
+      if (!obj) return;
+      if (typeof obj === 'string') {
+        // 匹配 data:image/xxx;base64,xxx 格式
+        if (obj.startsWith('data:image/')) {
+          images.push(obj);
+        } 
+        // 匹配可能是原始 base64 的长字符串 (简单启发式：长度>500且字符集匹配)
+        else if (obj.length > 500 && /^[A-Za-z0-9+/=]+$/.test(obj.substring(0, 100))) {
+          // 尝试补齐前缀，默认为 jpeg
+          images.push(`data:image/jpeg;base64,${obj}`);
+        }
+      } else if (Array.isArray(obj)) {
+        obj.forEach(search);
+      } else if (typeof obj === 'object') {
+        // 特殊处理 MiniMax 的 images 数组
+        if ('images' in obj && Array.isArray(obj.images)) {
+            obj.images.forEach((img: any) => {
+                if (typeof img === 'string') {
+                    if (img.startsWith('data:image/')) images.push(img);
+                    else images.push(`data:image/jpeg;base64,${img}`);
+                }
+            });
+        } else {
+            Object.values(obj).forEach(search);
+        }
+      }
+    };
+    
+    search(data);
+    // 去重
+    return Array.from(new Set(images));
+  };
+
   const fetchLogs = async () => {
     setLoading(true);
     try {
@@ -198,20 +239,21 @@ export function ModelLogs() {
                 <th className="px-6 py-4 text-xs font-bold uppercase tracking-wider text-muted-foreground">状态</th>
                 <th className="px-6 py-4 text-xs font-bold uppercase tracking-wider text-muted-foreground">开始时间</th>
                 <th className="px-6 py-4 text-xs font-bold uppercase tracking-wider text-muted-foreground">耗时</th>
+                <th className="px-6 py-4 text-xs font-bold uppercase tracking-wider text-muted-foreground">总消耗Token</th>
                 <th className="px-6 py-4 text-xs font-bold uppercase tracking-wider text-muted-foreground text-right">详情</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
               {loading ? (
                 <tr>
-                  <td colSpan={7} className="px-6 py-12 text-center">
+                  <td colSpan={8} className="px-6 py-12 text-center">
                     <Loader2 className="w-8 h-8 animate-spin mx-auto text-primary/50 mb-2" />
                     <span className="text-sm text-muted-foreground">加载中...</span>
                   </td>
                 </tr>
               ) : logs.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-6 py-12 text-center text-sm text-muted-foreground">
+                  <td colSpan={8} className="px-6 py-12 text-center text-sm text-muted-foreground">
                     未找到匹配的调用记录
                   </td>
                 </tr>
@@ -251,6 +293,11 @@ export function ModelLogs() {
                         <div className="flex items-center gap-1 text-xs font-medium text-primary">
                           <Clock className="w-3 h-3" />
                           {duration.toFixed(2)}s
+                        </div>
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className="text-xs font-mono font-bold text-indigo-400">
+                          {(log.input_tokens || 0) + (log.output_tokens || 0)}
                         </div>
                       </td>
                       <td className="px-6 py-4 text-right">
@@ -358,12 +405,25 @@ export function ModelLogs() {
                         <FileJson className="w-3.5 h-3.5" />
                         Request Payload (模型入参)
                       </h4>
-                      <button 
-                        onClick={() => setJsonView({data: selectedLog.request_payload, title: "模型入参 (Request Payload)"})}
-                        className="p-1 hover:bg-blue-500/20 rounded text-[10px] text-blue-400 flex items-center gap-1 transition-colors"
-                      >
-                        <Eye className="w-3 h-3" /> 全屏查看
-                      </button>
+                      <div className="flex items-center gap-2">
+                        {selectedLog.request_payload && extractBase64Images(selectedLog.request_payload).length > 0 && (
+                          <button 
+                            onClick={() => setImageView({
+                              images: extractBase64Images(selectedLog.request_payload), 
+                              title: "入参图片 (Input Images)"
+                            })}
+                            className="p-1 hover:bg-indigo-500/20 rounded text-[10px] text-indigo-400 flex items-center gap-1 transition-colors"
+                          >
+                            <ImageIcon className="w-3 h-3" /> 查看入参图片
+                          </button>
+                        )}
+                        <button 
+                          onClick={() => setJsonView({data: selectedLog.request_payload, title: "模型入参 (Request Payload)"})}
+                          className="p-1 hover:bg-blue-500/20 rounded text-[10px] text-blue-400 flex items-center gap-1 transition-colors"
+                        >
+                          <Eye className="w-3 h-3" /> 全屏查看
+                        </button>
+                      </div>
                     </div>
                     <pre className="bg-muted/50 p-4 rounded-lg text-[11px] font-mono overflow-x-auto border border-border/50 max-h-64 whitespace-pre-wrap custom-scrollbar">
                       {JSON.stringify(selectedLog.request_payload, null, 2)}
@@ -497,6 +557,141 @@ export function ModelLogs() {
                 </div>
               )}
             </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* 图片查看弹窗 (增强版：支持缩放、拖拽与多图切换) */}
+      <AnimatePresence>
+        {imageView && (
+          <div className="fixed inset-0 bg-black/95 backdrop-blur-xl z-[2000] flex flex-col overflow-hidden" onClick={() => setImageView(null)}>
+            {/* 顶部控制栏 */}
+            <motion.div 
+              initial={{ y: -20, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              className="px-6 py-4 flex items-center justify-between bg-white/5 border-b border-white/10 z-[2001]"
+              onClick={e => e.stopPropagation()}
+            >
+              <div className="flex items-center gap-4">
+                <div className="p-2 bg-indigo-500/20 rounded-lg">
+                  <ImageIcon className="w-5 h-5 text-indigo-400" />
+                </div>
+                <div>
+                  <h3 className="text-white font-bold tracking-tight">{imageView.title}</h3>
+                  <p className="text-[10px] text-white/40 font-mono">IMAGE {focusedImgIdx + 1} / {imageView.images.length} • {Math.round(zoom * 100)}% ZOOM</p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <div className="flex items-center bg-white/5 rounded-lg border border-white/10 p-1">
+                  <button 
+                    onClick={() => setZoom(prev => Math.max(0.5, prev - 0.25))}
+                    className="p-1.5 hover:bg-white/10 rounded text-white/60 hover:text-white transition-colors"
+                    title="缩小"
+                  >
+                    <ZoomOut className="w-4 h-4" />
+                  </button>
+                  <div className="px-2 text-[10px] font-mono text-white/40 w-12 text-center">{Math.round(zoom * 100)}%</div>
+                  <button 
+                    onClick={() => setZoom(prev => Math.min(5, prev + 0.25))}
+                    className="p-1.5 hover:bg-white/10 rounded text-white/60 hover:text-white transition-colors"
+                    title="放大"
+                  >
+                    <ZoomIn className="w-4 h-4" />
+                  </button>
+                  <div className="w-px h-4 bg-white/10 mx-1" />
+                  <button 
+                    onClick={() => { setZoom(1); }}
+                    className="p-1.5 hover:bg-white/10 rounded text-white/60 hover:text-white transition-colors"
+                    title="重置"
+                  >
+                    <RotateCcw className="w-4 h-4" />
+                  </button>
+                </div>
+                
+                <button 
+                  onClick={() => setImageView(null)}
+                  className="p-2 bg-white/10 hover:bg-red-500/20 text-white/60 hover:text-red-400 rounded-lg transition-all"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </motion.div>
+
+            {/* 主展示区 */}
+            <div className="flex-1 relative flex items-center justify-center overflow-hidden cursor-grab active:cursor-grabbing">
+              <AnimatePresence mode="wait">
+                <motion.div
+                  key={focusedImgIdx + zoom}
+                  initial={{ opacity: 0, scale: 0.9 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 1.1 }}
+                  className="w-full h-full flex items-center justify-center p-12"
+                >
+                  <motion.div
+                    drag
+                    dragConstraints={{ left: -1000, right: 1000, top: -1000, bottom: 1000 }}
+                    dragElastic={0.1}
+                    dragMomentum={false}
+                    className="relative"
+                    style={{ scale: zoom }}
+                    onClick={e => e.stopPropagation()}
+                  >
+                    <img 
+                      src={imageView.images[focusedImgIdx]} 
+                      alt="Focused Preview" 
+                      className="shadow-[0_0_50px_rgba(0,0,0,0.5)] rounded-lg border border-white/10 pointer-events-none select-none"
+                    />
+                  </motion.div>
+                </motion.div>
+              </AnimatePresence>
+
+              {/* 左右切换按钮 */}
+              {imageView.images.length > 1 && (
+                <>
+                  <button 
+                    onClick={(e) => { e.stopPropagation(); setFocusedImgIdx(prev => (prev > 0 ? prev - 1 : imageView.images.length - 1)); setZoom(1); }}
+                    className="absolute left-6 top-1/2 -translate-y-1/2 p-4 bg-white/5 hover:bg-white/10 border border-white/10 rounded-full text-white/40 hover:text-white transition-all backdrop-blur-md"
+                  >
+                    <ChevronLeft className="w-8 h-8" />
+                  </button>
+                  <button 
+                    onClick={(e) => { e.stopPropagation(); setFocusedImgIdx(prev => (prev < imageView.images.length - 1 ? prev + 1 : 0)); setZoom(1); }}
+                    className="absolute right-6 top-1/2 -translate-y-1/2 p-4 bg-white/5 hover:bg-white/10 border border-white/10 rounded-full text-white/40 hover:text-white transition-all backdrop-blur-md"
+                  >
+                    <ChevronRight className="w-8 h-8" />
+                  </button>
+                </>
+              )}
+            </div>
+
+            {/* 底部缩略图 */}
+            {imageView.images.length > 1 && (
+              <motion.div 
+                initial={{ y: 20, opacity: 0 }}
+                animate={{ y: 0, opacity: 1 }}
+                className="px-6 py-6 bg-black/40 border-t border-white/10 flex justify-center gap-4 z-[2001]"
+                onClick={e => e.stopPropagation()}
+              >
+                {imageView.images.map((src, idx) => (
+                  <button 
+                    key={idx}
+                    onClick={() => { setFocusedImgIdx(idx); setZoom(1); }}
+                    className={cn(
+                      "w-20 h-12 rounded-lg overflow-hidden border-2 transition-all shrink-0",
+                      focusedImgIdx === idx ? "border-indigo-500 scale-110 shadow-lg shadow-indigo-500/20" : "border-white/10 grayscale hover:grayscale-0 hover:border-white/40"
+                    )}
+                  >
+                    <img src={src} className="w-full h-full object-cover" alt={`Thumb ${idx}`} />
+                  </button>
+                ))}
+              </motion.div>
+            )}
+            
+            {/* 快捷提示 */}
+            <div className="absolute bottom-4 right-6 text-[10px] text-white/20 font-mono pointer-events-none">
+              DRAG TO PAN • SCROLL NOT SUPPORTED YET
+            </div>
           </div>
         )}
       </AnimatePresence>

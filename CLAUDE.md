@@ -115,7 +115,7 @@ EnvMatch/
 ```bash
 cd backend
 pip install -r requirements.txt
-uvicorn main:app --reload --port 8000
+uvicorn main:app --reload --port 8888
 ```
 
 **Frontend** (需要 Node.js 18+):
@@ -125,7 +125,7 @@ npm install
 npm run dev  # 默认 http://localhost:5173
 ```
 
-前端 API 请求硬编码为 `http://localhost:8000`, 需要后端先启动。
+前端 API 请求硬编码为 `http://localhost:8888`, 需要后端先启动。
 
 ## Key Notes
 

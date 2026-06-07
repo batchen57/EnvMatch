@@ -1,6 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { Plus, Edit2, Trash2, Save, X, FileText, Clock, Search } from 'lucide-react';
-import { cn } from '@/lib/utils';
 
 export function PromptConfig() {
   const [prompts, setPrompts] = useState<any[]>([]);

@@ -1,7 +1,7 @@
-import React, { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type MouseEvent } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import ReactECharts from 'echarts-for-react';
-import { Download, Play, ArrowLeft, Video, Image, Scan, Loader2, X, AlertCircle, Clock, Zap, FileText, Hash, Calendar, Layers, Minus, Plus, RotateCcw, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Download, ArrowLeft, Video, Image, Scan, Loader2, X, Zap, Layers, Minus, Plus, RotateCcw, ChevronLeft, ChevronRight } from 'lucide-react';
 import { domToPng } from 'modern-screenshot';
 import { jsPDF } from 'jspdf';
 import { cn } from '@/lib/utils';
@@ -60,7 +60,7 @@ export function ResultDetails() {
 
   const currentIndex = selectedImg ? allKeyframes.indexOf(selectedImg) : -1;
 
-  const handlePrev = (e?: React.MouseEvent) => {
+  const handlePrev = (e?: MouseEvent) => {
     e?.stopPropagation();
     if (currentIndex > 0) {
       setSelectedImg(allKeyframes[currentIndex - 1]);
@@ -69,7 +69,7 @@ export function ResultDetails() {
     }
   };
 
-  const handleNext = (e?: React.MouseEvent) => {
+  const handleNext = (e?: MouseEvent) => {
     e?.stopPropagation();
     if (currentIndex < allKeyframes.length - 1) {
       setSelectedImg(allKeyframes[currentIndex + 1]);
@@ -104,7 +104,7 @@ export function ResultDetails() {
           }
         });
       })
-    );
+    ).then(() => undefined);
   };
 
   const handleExport = async () => {
@@ -130,7 +130,7 @@ export function ResultDetails() {
       const rdi = radarChartRef.current?.getEchartsInstance?.();
       if (ri) ringDataUrl = ri.getDataURL({ type: 'png', pixelRatio: 2, backgroundColor: '#0f172a' });
       if (rdi) radarDataUrl = rdi.getDataURL({ type: 'png', pixelRatio: 2, backgroundColor: '#0f172a' });
-    } catch (e) { /* best-effort */ }
+    } catch { /* best-effort */ }
 
     // 2. Helpers
     const S = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -678,7 +678,7 @@ export function ResultDetails() {
                   }}
                   transition={{ type: 'spring', damping: 25, stiffness: 200 }}
                   drag
-                  onDrag={(e, info) => {
+                  onDrag={(_, info) => {
                     setPos(prev => ({
                       x: prev.x + info.delta.x,
                       y: prev.y + info.delta.y

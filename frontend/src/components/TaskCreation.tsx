@@ -1,9 +1,15 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { Upload, Settings, Cpu, FileJson, X, Loader2, Scan, Video, Zap } from 'lucide-react';
+import { useState, useRef, useEffect } from 'react';
+import { Upload, Settings, Cpu, FileJson, X, Loader2, Scan, Zap } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 
-export function TaskCreation({ onClose, onTaskCreated }: { onClose: () => void, onTaskCreated?: () => void }) {
+export function TaskCreation({
+  onClose,
+  onTaskCreated,
+}: {
+  onClose: () => void;
+  onTaskCreated?: () => void | Promise<void>;
+}) {
   const [currentStep, setCurrentStep] = useState(1);
   const [taskName, setTaskName] = useState("");
   const [videoA, setVideoA] = useState<File | null>(null);
@@ -14,6 +20,9 @@ export function TaskCreation({ onClose, onTaskCreated }: { onClose: () => void, 
     recognition_mode: 'image', // 'image' | 'video'
     sampling_type: 'fixed',    // 'fixed' | 'perceptual'
     sampling_fps: 1,
+    // The backend applies this interval consistently to frames and native video payloads.
+    clip_start_seconds: 0,
+    clip_end_seconds: 15,
     resolution: false,
     resolution_val: 720,
     format_convert: false,
@@ -84,6 +93,11 @@ export function TaskCreation({ onClose, onTaskCreated }: { onClose: () => void, 
       }
     }
 
+    if (currentStep === 2 && preprocessOptions.clip_end_seconds <= preprocessOptions.clip_start_seconds) {
+      setError("结束时间必须大于开始时间");
+      return;
+    }
+
     if (currentStep < 5) {
       setCurrentStep(currentStep + 1);
     } else {
@@ -112,7 +126,7 @@ export function TaskCreation({ onClose, onTaskCreated }: { onClose: () => void, 
         body: formData,
       });
       if (res.ok) {
-        if (onTaskCreated) onTaskCreated();
+        await onTaskCreated?.();
         onClose();
       } else {
         setError("创建任务失败，请检查模型配置及网络状态");
@@ -418,6 +432,42 @@ export function TaskCreation({ onClose, onTaskCreated }: { onClose: () => void, 
                   <Settings className="w-4 h-4 text-primary" />
                   视频预处理配置
                 </h4>
+                <div className="mb-3 p-3 bg-muted/10 border border-border rounded-lg">
+                  <div className="flex items-center justify-between gap-4">
+                    <div>
+                      <div className="text-xs font-medium">视频截取区间</div>
+                      <div className="text-[10px] text-muted-foreground mt-1">仅对指定时间段进行抽帧和模型分析</div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="number"
+                        min={0}
+                        step={0.1}
+                        value={preprocessOptions.clip_start_seconds}
+                        onChange={e => setPreprocessOptions({
+                          ...preprocessOptions,
+                          clip_start_seconds: Math.max(0, Number(e.target.value))
+                        })}
+                        className="w-20 h-8 px-2 text-xs bg-background border border-border rounded"
+                        aria-label="开始时间（秒）"
+                      />
+                      <span className="text-xs text-muted-foreground">秒 至</span>
+                      <input
+                        type="number"
+                        min={0.1}
+                        step={0.1}
+                        value={preprocessOptions.clip_end_seconds}
+                        onChange={e => setPreprocessOptions({
+                          ...preprocessOptions,
+                          clip_end_seconds: Math.max(0.1, Number(e.target.value))
+                        })}
+                        className="w-20 h-8 px-2 text-xs bg-background border border-border rounded"
+                        aria-label="结束时间（秒）"
+                      />
+                      <span className="text-xs text-muted-foreground">秒</span>
+                    </div>
+                  </div>
+                </div>
                 <div className="grid grid-cols-3 gap-3">
                   {[
                     { key: 'resolution', title: '分辨率调整', desc: '目标高度', sub: `${preprocessOptions.resolution_val}p` },

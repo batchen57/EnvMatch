@@ -2,140 +2,167 @@
 
 ## Project Overview
 
-EnvMatch AI — 视频环境相似度对比平台 (v1.4.0)。用户上传两段视频，系统通过多模态大模型分析背景环境的相似度，输出综合评分、维度评分、相似点/差异点及分析报告。支持多种 AI 模型 (Gemini, GPT-4o, Qwen-VL, MiniMax 等) 和识别模式 (图片模式/视频模式)。新增全量模型调用审计与专业 Token 估算体系。
+EnvMatch AI 是一个视频/图片环境相似度对比平台。用户上传 A/B 两份素材，系统通过多模态模型分析背景环境，输出综合相似度、维度评分、相似点、差异点、总结及 Token 用量。
+
+当前后端是 Java 17 + Spring Boot 实现。不要参考旧版 Python/FastAPI 目录结构或恢复已移除的 Python 依赖。
 
 ## Tech Stack
 
-- **Backend**: Python 3, FastAPI, SQLAlchemy, SQLite (可切换 PostgreSQL)
-- **Frontend**: React 19, TypeScript, Vite 8, Tailwind CSS v4, ECharts, React Router v7, Framer Motion, Radix UI, dnd-kit
-- **AI**: 多模型支持 — Google Gemini (原生视频), DashScope SDK (Qwen-VL 原生视频), OpenAI 兼容接口 (GPT-4o, MiniMax, DeepSeek 等)
-- **Video Processing**: FFmpeg (抽帧/压制/预处理), PySceneDetect (场景检测), OpenCV (光流分析)
+- **Backend**: Java 17, Spring Boot 3.3.5, Spring MVC, Spring Data JPA, Hibernate, SQLite
+- **Frontend**: React 19, TypeScript 6, Vite 8, Tailwind CSS 4, ECharts, React Router 7, Framer Motion, Radix UI, dnd-kit
+- **AI**: Google Gemini API, OpenAI-compatible multimodal APIs, MiniMax native VLM endpoint
+- **Media**: FFmpeg/FFprobe, Java ImageIO/Graphics2D
+- **Tests**: JUnit 5, Spring Boot Test, AssertJ, Mockito
 
 ## Project Structure
 
-```
+```text
 EnvMatch/
 ├── backend/
-│   ├── main.py              # FastAPI 应用入口, CORS 配置, 所有 API 路由 + Pydantic schemas
-│   ├── models.py            # SQLAlchemy 模型: Task, TaskResult, AIModel, PromptTemplate
-│   ├── database.py          # 数据库引擎 (SQLite 默认, PostgreSQL 可切换), get_db 依赖
-│   ├── requirements.txt     # Python 依赖
-│   ├── services/
-│   │   └── task_processor.py  # 后台异步任务: 预处理 → 抽帧 → 多模型 AI 分析 → 入库 + Webhook
-│   └── storage/             # 上传视频 + 抽帧结果 (按 task_id 组织)
+│   ├── pom.xml
+│   ├── PERCEPTUAL_SAMPLING.md
+│   └── src/
+│       ├── main/
+│       │   ├── java/com/envmatch/
+│       │   │   ├── EnvMatchApplication.java
+│       │   │   ├── config/       # CORS, static storage mapping, bounded async executor
+│       │   │   ├── model/        # JPA entities and JSON converter
+│       │   │   ├── repository/   # Spring Data repositories and paged native queries
+│       │   │   ├── service/      # storage, video, AI, task processing, seed/recovery
+│       │   │   └── web/          # REST controller and request DTOs
+│       │   └── resources/application.properties
+│       └── test/java/com/envmatch/
+│           ├── TaskWorkflowIntegrationTest.java
+│           └── service/
 ├── frontend/
 │   ├── src/
-│   │   ├── main.tsx         # React 入口, BrowserRouter
-│   │   ├── App.tsx          # 根布局 (Sidebar + Header + Routes)
+│   │   ├── App.tsx
 │   │   ├── components/
-│   │   │   ├── Sidebar.tsx      # 侧边导航 (含方案介绍、调用记录等 7 项)
-│   │   │   ├── PlatformSolutions.tsx # 方案介绍: 动效对比图像 vs 视频模式原理
-│   │   │   ├── ModelLogs.tsx    # 模型调用记录: 全量审计 + JSON 全屏查看 (支持拖拽/缩放)
-│   │   │   ├── Pipeline.tsx     # 5 步分析流程可视化 (静态展示)
-│   │   │   ├── Overview.tsx     # 仪表盘: 统计卡片 + ECharts 趋势图 + 分布饼图
-│   │   │   ├── TaskList.tsx     # 任务列表: 表格 + 状态筛选标签 + 5s 自动轮询 + 分页
-│   │   │   ├── TaskCreation.tsx # 新建任务向导 (5 步校验 + 物理压缩配置)
-│   │   │   ├── ResultDetails.tsx # 结果详情: 环形图 + 雷达图 + 视频播放 + AI 分析 + PDF 导出 (隐藏视频模式 Keyframes)
-│   │   │   ├── ResultReport.tsx # 结果报表: 统计卡片 + 雷达图 + 模型性能图 + 趋势图 + 分布图
-│   │   │   ├── ModelConfig.tsx  # 模型管理: CRUD + 拖拽排序 + 预设模板 + 能力标签
-│   │   │   └── PromptConfig.tsx # 提示词管理: CRUD + 搜索 + 卡片网格
-│   │   └── lib/utils.ts     # cn() 工具函数 (clsx + tailwind-merge)
-│   ├── index.html
-│   ├── vite.config.ts       # Vite 配置: React 插件 + Tailwind v4 + @ 别名
-│   └── package.json
-└── CLAUDE.md
+│   │   └── lib/utils.ts
+│   ├── package.json
+│   └── vite.config.ts
+├── README.md
+└── RELEASENOTES.md
 ```
 
-## Backend API Endpoints
+## Backend Responsibilities
+
+- `ApiController`: API boundary validation, CRUD, task creation/deletion, dashboard aggregation and cleanup.
+- `TaskProcessingService`: asynchronous task state transitions, metadata, extraction, optional compression, AI analysis, result persistence and Webhook.
+- `VideoService`: FFprobe metadata, FFmpeg extraction/compression and deterministic perceptual sampling.
+- `AiAnalysisService`: provider-specific payloads, HTTP model calls, JSON result parsing, Token calculation and sanitized audit logs.
+- `StorageService`: upload storage under the configured storage root.
+- `StartupRecoveryService`: marks interrupted `PENDING`/`PROCESSING` tasks as `FAILED` on startup.
+- `ModelCallLogSchemaService`: migrates legacy SQLite log primary keys when needed.
+
+## API Endpoints
 
 | Method | Path | Description |
-|--------|------|-------------|
-| POST | `/tasks/` | 创建任务 (multipart: task_name, video_a, video_b, model_id, prompt, preprocess_options) |
-| GET | `/tasks/` | 任务列表 (支持 status/skip/limit, 返回各状态计数) |
-| GET | `/tasks/{task_id}` | 获取任务详情及结果 (含 TaskResult) |
-| DELETE | `/tasks/{task_id}` | 删除任务、结果及关联存储文件 |
-| GET | `/dashboard-stats` | 仪表盘统计数据 (含趋势/分布/模型汇总/维度均值) |
-| POST | `/cleanup` | 清理超过 N 天的存储文件 |
-| GET | `/prompt-templates/` | 提示词模板列表 (首次自动 seed 默认模板) |
-| POST | `/prompt-templates/` | 创建提示词模板 |
-| PUT | `/prompt-templates/{id}` | 更新提示词模板 |
-| DELETE | `/prompt-templates/{id}` | 删除提示词模板 |
-| GET | `/models/` | AI 模型列表 (首次自动 seed 5 个预设模型) |
-| POST | `/models/` | 创建 AI 模型 |
-| PUT | `/models/{model_id}` | 更新 AI 模型 |
-| DELETE | `/models/{model_id}` | 删除 AI 模型 |
-| GET | `/model-logs/` | 模型调用记录列表 (支持 search/skip/limit 分页) |
+|---|---|---|
+| POST | `/tasks/` | Create an async comparison task from multipart data |
+| GET | `/tasks/` | List tasks with `status`, `skip`, `limit` |
+| GET | `/tasks/{taskId}` | Return task and optional result |
+| DELETE | `/tasks/{taskId}` | Delete task, result and generated media |
+| GET | `/dashboard-stats` | Return totals, trends, distribution and model summaries |
+| POST | `/cleanup?days=7` | Delete old files from storage |
+| GET/POST | `/prompt-templates/` | List/create prompt templates |
+| PUT/DELETE | `/prompt-templates/{templateId}` | Update/delete prompt templates |
+| GET/POST | `/models/` | List/create model configurations |
+| PUT/DELETE | `/models/{modelId}` | Update/delete model configurations |
+| GET | `/model-logs/` | Search and paginate model audit logs |
+| GET | `/storage/**` | Serve uploaded and generated media |
 
-## Data Models
-
-**Task**: id (UUID), task_name, video_a_path, video_b_path, status (PENDING/PROCESSING/COMPLETED/FAILED), similarity_score, model_id, prompt, input_tokens, output_tokens, video_a_duration, video_b_duration, video_a_resolution, video_b_resolution, video_a_size, video_b_size, preprocess_options (JSON), created_at, updated_at
-
-**TaskResult**: task_id (FK→Task), dimension_scores (JSON: architecture/vegetation/lighting_weather/facilities/road_surface), similar_points (JSON), difference_points (JSON), summary, key_frames_a/b (JSON), error_message, input_tokens, output_tokens
-
-**AIModel**: id (UUID), name, identifier, provider, api_key, base_url, description, capabilities (JSON: [text/image/video]), is_default, sort_order, created_at, updated_at
-
-**ModelCallLog**: id (Int), task_id, task_name, model_id, model_url, request_payload (JSON), response_body (JSON), started_at, ended_at, status_code, input_tokens, output_tokens
-
-**PromptTemplate**: id (UUID), name, content, created_at, updated_at
+JSON uses `snake_case`. The frontend currently calls `http://localhost:8888` directly, so keep API compatibility unless the frontend is updated in the same change.
 
 ## Task Processing Pipeline
 
-1. `POST /tasks/` → 保存视频文件到 `storage/`, 创建 PENDING 状态 Task
-2. 后台 `process_video_task()`:
-   - 状态 → PROCESSING, 读取 preprocess_options
-   - 可选预处理: FFmpeg 物理压缩 (`preprocess_video_for_vlm`) → 降低分辨率至 360p-1080p
-   - 抽帧 (`extract_frames`): 图像模式下用于缝合，视频模式下用于 UI 预览
-   - AI 分析路由:
-     - `recognition_mode="video"` + Qwen → **DashScope SDK** (`MultiModalConversation.call`)
-     - `recognition_mode="video"` + Gemini → `analyze_environment_with_gemini()`
-     - 其他 → `analyze_with_openai_compatible()` (图像网格缝合 + OpenAI 兼容 API)
-   - **Token 估算**: 针对无 Usage 返回的 Qwen-VL 视频任务，应用官方 `smart_nframes` + `smart_resize` 算法估算
-   - **审计入库**: 每次 API 调用结束后，自动将 Payload 与响应持久化至 `ModelCallLog` 表
-   - 状态 → COMPLETED, 写入 TaskResult, 更新 Task (score/tokens)
-   - 失败 → FAILED, 写入 error_message
-   - 可选: 通过 `WEBHOOK_URL` 环境变量发送完成通知
+1. Validate multipart fields and `preprocess_options`.
+2. Save both uploads under `envmatch.storage-dir`.
+3. Persist a `PENDING` task and submit it to the bounded `taskExecutor`.
+4. Mark the task `PROCESSING`; probe duration, resolution, size and FPS.
+5. Extract fixed or perceptual frames and persist a partial result for UI preview.
+6. Optionally compress native-video inputs to the requested resolution.
+7. Build an image grid or native-video payload and invoke the configured model.
+8. Sanitize and persist request/response audit data.
+9. Persist scores, result details and Token usage; mark the task `COMPLETED` or `FAILED`.
+10. Send an optional completion/failure Webhook.
 
-## Frontend Routes
+## Preprocessing Options Schema
 
-| Path | Component | Description |
-|------|-----------|-------------|
-| `/` | — | 重定向到 `/dashboard` |
-| `/dashboard` | Pipeline + Overview | 主仪表盘 |
-| `/tasks` | TaskList | 任务管理列表 |
-| `/tasks/:id` | ResultDetails | 单任务结果详情 |
-| `/results` | ResultReport | 结果报表 |
-| `/prompts` | PromptConfig | 提示词模板管理 |
-| `/models` | ModelConfig | AI 模型管理 |
-| `/solutions` | PlatformSolutions | 平台方案介绍 |
-| `/logs` | ModelLogs | 模型调用审计 |
+`preprocess_options` is passed as a JSON string to `POST /tasks/` containing:
+- `recognition_mode`: `"image"` | `"video"` (default: `"image"`)
+- `sampling_type`: `"fixed"` | `"perceptual"` (default: `"fixed"`)
+- `sampling_fps`: `1` to `5` (default: `1`)
+- `clip_start_seconds`: double (default: `0.0`, must be >= `0.0`)
+- `clip_end_seconds`: double (default: `15.0`, must be > `clip_start_seconds`)
+- `resolution`: boolean (optional)
+- `resolution_val`: `90` to `2160` (default: `720`, target height)
 
-## Running Locally
+## Perceptual Sampling Contract
 
-**Backend**:
+`backend/PERCEPTUAL_SAMPLING.md` is the source of truth:
+
+- Sample preview candidates at 2 FPS.
+- Compare 32x18 luminance signatures and 16-bin histograms.
+- Always retain first and last frames.
+- Retain frames when histogram difference exceeds `0.30` or accumulated luminance motion exceeds `0.50`.
+- Produce chronological, duplicate-free output with at most 10 frames.
+- Fall back to fixed extraction if needed and fill temporal coverage to at least five frames when available.
+
+Threshold or output-limit changes require updating both the contract document and regression tests.
+
+## Configuration
+
+Defaults are in `backend/src/main/resources/application.properties`.
+
+| Property | Default | Purpose |
+|---|---:|---|
+| `server.port` | `8888` | HTTP port |
+| `spring.datasource.url` | `jdbc:sqlite:envmatch.db` | SQLite database |
+| `envmatch.storage-dir` | `storage` | Upload and generated-file root |
+| `envmatch.ai.max-inline-media-bytes` | `16777216` | Combined inline-video size limit |
+| `envmatch.task-executor.core-size` | `2` | Core async workers |
+| `envmatch.task-executor.max-size` | `4` | Maximum async workers |
+| `envmatch.task-executor.queue-capacity` | `50` | Pending task capacity |
+| `envmatch.webhook-url` / `WEBHOOK_URL` | empty | Task completion/failure callback |
+
+Multipart limits are 2048 MB per file and 4096 MB per request.
+
+## Running and Verification
+
 ```bash
 cd backend
-pip install -r requirements.txt
-uvicorn main:app --reload --port 8888
+mvn spring-boot:run
 ```
 
-**Frontend** (需要 Node.js 18+):
 ```bash
 cd frontend
 npm install
-npm run dev  # 默认 http://localhost:5173
+npm run dev
 ```
 
-前端 API 请求硬编码为 `http://localhost:8888`, 需要后端先启动。
+Before finishing backend changes:
 
-## Key Notes
+```bash
+cd backend
+mvn test
+```
 
-- Database: 默认 SQLite (`envmatch.db`), `connect_args={"check_same_thread": False}` 用于 FastAPI 异步环境
-- CORS: 允许所有来源 (`allow_origins=["*"]`)
-- FFmpeg: 必须安装并在 PATH 中, 抽帧失败不会阻断流程 (降级处理)
-- AI 模型: 通过 `/models/` 接口管理, 首次访问自动 seed 5 个预设模型 (Gemini/GPT-4o/MiniMax/Qwen)
-- 提示词模板: 通过 `/prompt-templates/` 接口管理, 首次访问自动 seed 系统默认提示词
-- 感知抽帧依赖 PySceneDetect + OpenCV, 固定抽帧仅需 FFmpeg
-- 前端 TaskList 每 5 秒自动轮询刷新
-- 视频文件存储在本地 `backend/storage/` 目录, 按 task_id 组织
-- 深色主题 + 毛玻璃效果, CSS 变量定义在 `index.css`
-- ResultDetails 支持 PDF 导出 (modern-screenshot + jsPDF)
+Before finishing frontend changes:
+
+```bash
+cd frontend
+npm run lint
+npm run build
+```
+
+## Implementation Notes
+
+- Keep SQLite compatibility; avoid database-specific JPA behavior unless migration support is included.
+- The task executor is intentionally bounded to protect JVM memory and reduce SQLite lock contention.
+- Task creation spans filesystem and database operations, so preserve compensating cleanup on partial failure.
+- Do not write raw video Base64 or very large Base64 fields to audit logs.
+- Native video automatically falls back to sampled frames when files exceed the inline-media limit.
+- `TaskResult` may exist while a task is still processing because key frames are saved early for preview.
+- Static media is exposed from the configured storage directory through `/storage/**`.
+- The frontend task list polls every five seconds and resets to the first unfiltered page after creating a task.

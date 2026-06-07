@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Plus, Edit2, Trash2, Save, X, Cpu, Globe, GripVertical, Info, Settings, FileText, Zap, Key, Link } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Plus, Edit2, Trash2, Save, X, Cpu, Globe, GripVertical, Info, Settings, FileText, Zap, Key } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import {
   DndContext,
@@ -21,16 +21,12 @@ import { CSS } from '@dnd-kit/utilities';
 
 interface SortableModelItemProps {
   m: any;
-  editingId: string | null;
-  editForm: any;
-  setEditForm: (val: any) => void;
   setEditingId: (val: string | null) => void;
-  handleSave: () => void;
   handleDelete: (id: string) => void;
   className?: string;
 }
 
-function SortableModelItem({ m, editingId, editForm, setEditForm, setEditingId, handleSave, handleDelete, className }: SortableModelItemProps) {
+function SortableModelItem({ m, setEditingId, handleDelete, className }: SortableModelItemProps) {
   const {
     attributes,
     listeners,
@@ -233,9 +229,6 @@ export function ModelConfig() {
               <SortableModelItem
                 key={m.id} 
                 m={m}
-                editingId={null}
-                editForm={editForm} 
-                setEditForm={setEditForm}
                 setEditingId={(id) => {
                   if (id) {
                     const model = models.find(x => x.id === id);
@@ -256,7 +249,6 @@ export function ModelConfig() {
                     setEditingId(null);
                   }
                 }}
-                handleSave={handleSave}
                 handleDelete={handleDelete}
               />
             ))}

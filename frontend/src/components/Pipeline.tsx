@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { Play, Settings2, Cpu, FileJson, MonitorSmartphone, X, Info, CheckCircle2, Layers } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { motion, AnimatePresence } from 'framer-motion';

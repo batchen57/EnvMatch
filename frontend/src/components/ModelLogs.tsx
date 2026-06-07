@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Search, ChevronLeft, ChevronRight, ChevronDown, Loader2, Eye, Calendar, Cpu, Link2, FileJson, Info, X, Clock, Image as ImageIcon, ZoomIn, ZoomOut, RotateCcw, Maximize2 } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Search, ChevronLeft, ChevronRight, ChevronDown, Loader2, Eye, Cpu, Link2, FileJson, X, Clock, Image as ImageIcon, ZoomIn, ZoomOut, RotateCcw } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { motion, AnimatePresence, useDragControls } from 'framer-motion';
 
@@ -40,7 +40,7 @@ export function ModelLogs() {
         try {
           const parsed = JSON.parse(s);
           return autoParseJson(parsed);
-        } catch (e) {
+        } catch {
           // 继续尝试下方的“智能提取”逻辑
         }
       }
@@ -84,7 +84,9 @@ export function ModelLogs() {
                 pos = end + 1;
                 continue;
               }
-            } catch (e) {}
+            } catch {
+              // Continue scanning for embedded JSON.
+            }
           }
           pos = actualStart + 1;
         }
@@ -117,7 +119,9 @@ export function ModelLogs() {
           if (typeof unquoted === 'string' && unquoted !== s) {
             return autoParseJson(unquoted);
           }
-        } catch (e) {}
+        } catch {
+          // Not a quoted JSON string.
+        }
       }
     } else if (typeof data === 'object' && data !== null) {
       if (Array.isArray(data)) {
@@ -175,7 +179,11 @@ export function ModelLogs() {
     setLoading(true);
     try {
       const skip = (page - 1) * limit;
-      const res = await fetch(`http://localhost:8888/model-logs/?search=${encodeURIComponent(search)}&skip=${skip}&limit=${limit}`);
+      const res = await fetch(
+        `http://localhost:8888/model-logs/?search=${encodeURIComponent(search)}&skip=${skip}&limit=${limit}`,
+        { cache: 'no-store' }
+      );
+      if (!res.ok) throw new Error(`Model logs request failed: ${res.status}`);
       const data = await res.json();
       setLogs(data.logs);
       setTotal(data.total);
@@ -188,6 +196,8 @@ export function ModelLogs() {
 
   useEffect(() => {
     fetchLogs();
+    const interval = setInterval(fetchLogs, 5000);
+    return () => clearInterval(interval);
   }, [page, limit]);
 
   const handleSearch = (e: React.FormEvent) => {
@@ -259,7 +269,10 @@ export function ModelLogs() {
                 </tr>
               ) : (
                 logs.map((log) => {
-                  const duration = log.ended_at ? (new Date(log.ended_at).getTime() - new Date(log.started_at).getTime()) / 1000 : 0;
+                  const isProcessing = log.status_code === 'PROCESSING';
+                  const duration = log.started_at && log.ended_at
+                    ? (new Date(log.ended_at).getTime() - new Date(log.started_at).getTime()) / 1000
+                    : 0;
                   return (
                     <tr key={log.id} className="hover:bg-muted/10 transition-colors group">
                       <td className="px-6 py-4">
@@ -281,9 +294,13 @@ export function ModelLogs() {
                       <td className="px-6 py-4">
                         <span className={cn(
                           "px-2 py-0.5 rounded-full text-[10px] font-bold",
-                          log.status_code === '200' ? "bg-emerald-500/10 text-emerald-500" : "bg-red-500/10 text-red-500"
+                          log.status_code === '200'
+                            ? "bg-emerald-500/10 text-emerald-500"
+                            : isProcessing
+                              ? "bg-amber-500/10 text-amber-500"
+                              : "bg-red-500/10 text-red-500"
                         )}>
-                          {log.status_code || 'ERR'}
+                          {isProcessing ? '调用中' : (log.status_code || 'ERR')}
                         </span>
                       </td>
                       <td className="px-6 py-4">
@@ -292,7 +309,7 @@ export function ModelLogs() {
                       <td className="px-6 py-4">
                         <div className="flex items-center gap-1 text-xs font-medium text-primary">
                           <Clock className="w-3 h-3" />
-                          {duration.toFixed(2)}s
+                          {isProcessing ? '进行中' : `${duration.toFixed(2)}s`}
                         </div>
                       </td>
                       <td className="px-6 py-4">

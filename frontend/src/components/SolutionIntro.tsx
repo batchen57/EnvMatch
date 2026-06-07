@@ -1,7 +1,5 @@
-import React from 'react';
-import { Video, Image, Scan, Zap, Cpu, ArrowRight, CheckCircle2, ShieldCheck, Layers, Gauge } from 'lucide-react';
+import { Video, Image, Zap, Cpu, ArrowRight, CheckCircle2, ShieldCheck, Layers, Gauge } from 'lucide-react';
 import { motion } from 'framer-motion';
-import { cn } from '@/lib/utils';
 
 export function SolutionIntro() {
   return (

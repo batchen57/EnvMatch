@@ -21,11 +21,11 @@
     "noFallthroughCasesInSwitch": true,
 
     /* Path Aliases */
+    "ignoreDeprecations": "6.0",
     "baseUrl": ".",
     "paths": {
       "@/*": ["src/*"]
     }
   },
-  "include": ["src"],
-  "references": [{ "path": "./tsconfig.node.json" }]
+  "include": ["src"]
 }

@@ -1,4 +1,3 @@
-import React from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { Sidebar } from './components/Sidebar';
 import { Pipeline } from './components/Pipeline';
@@ -10,7 +9,7 @@ import { PromptConfig } from './components/PromptConfig';
 import { ModelConfig } from './components/ModelConfig';
 import { ModelLogs } from './components/ModelLogs';
 import { SolutionIntro } from './components/SolutionIntro';
-import { Bell, HelpCircle, Info, ListFilter } from 'lucide-react';
+import { Bell, HelpCircle } from 'lucide-react';
 function Dashboard() {
   return (
     <div className="flex flex-col gap-6">

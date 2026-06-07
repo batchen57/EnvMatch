@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Eye, RefreshCw, Trash2, Video, Scan } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -8,27 +8,34 @@ export function TaskList() {
   const navigate = useNavigate();
   const [showCreation, setShowCreation] = useState(false);
   const [tasks, setTasks] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('ALL');
   const [page, setPage] = useState(1);
   const [totalCounts, setTotalCounts] = useState<any>({ ALL: 0, PROCESSING: 0, COMPLETED: 0, FAILED: 0 });
+  const latestRequest = useRef(0);
   const pageSize = 10;
-  const fetchTasks = async () => {
+  const fetchTasks = useCallback(async (override?: { page?: number; statusFilter?: StatusFilter }) => {
+    const requestId = ++latestRequest.current;
     try {
-      const skip = (page - 1) * pageSize;
-      const res = await fetch(`http://localhost:8888/tasks/?status=${statusFilter}&skip=${skip}&limit=${pageSize}`);
+      const targetPage = override?.page ?? page;
+      const targetStatus = override?.statusFilter ?? statusFilter;
+      const skip = (targetPage - 1) * pageSize;
+      const res = await fetch(
+        `http://localhost:8888/tasks/?status=${targetStatus}&skip=${skip}&limit=${pageSize}`,
+        { cache: 'no-store' }
+      );
       if (res.ok) {
         const data = await res.json();
+        if (requestId !== latestRequest.current) return;
         setTasks(data.tasks || []);
         setTotalCounts(data.total_counts || { ALL: 0, PROCESSING: 0, COMPLETED: 0, FAILED: 0 });
       }
     } catch (err) {
       console.error("Fetch tasks failed", err);
     } finally {
-      setLoading(false);
+      // Request lifecycle intentionally ends without a spinner state.
     }
-  };
+  }, [page, statusFilter]);
   const handleRefresh = async () => {
     setRefreshing(true);
     await fetchTasks();
@@ -45,11 +52,16 @@ export function TaskList() {
       console.error("Delete task failed", err);
     }
   };
+  const handleTaskCreated = async () => {
+    setStatusFilter('ALL');
+    setPage(1);
+    await fetchTasks({ page: 1, statusFilter: 'ALL' });
+  };
   useEffect(() => {
     fetchTasks();
     const interval = setInterval(fetchTasks, 5000);
     return () => clearInterval(interval);
-  }, [page, statusFilter]);
+  }, [fetchTasks]);
   const formatTime = (ts: string) => {
     if (!ts) return "--";
     return new Date(ts).toLocaleString();
@@ -210,7 +222,7 @@ export function TaskList() {
           </div>
         </div>
       </div>
-      {showCreation && <TaskCreation onClose={() => setShowCreation(false)} onTaskCreated={fetchTasks} />}
+      {showCreation && <TaskCreation onClose={() => setShowCreation(false)} onTaskCreated={handleTaskCreated} />}
     </>
   );
 }

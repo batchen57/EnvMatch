@@ -1,4 +1,3 @@
-import React from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Home, List, BarChart2, FileText, Box, Info, ListFilter } from 'lucide-react';
 import { cn } from '@/lib/utils';

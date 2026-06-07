@@ -1,37 +1,35 @@
 package com.envmatch.model;
 
+import com.baomidou.mybatisplus.annotation.FieldFill;
+import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableField;
+import com.baomidou.mybatisplus.annotation.TableId;
+import com.baomidou.mybatisplus.annotation.TableName;
+import com.baomidou.mybatisplus.extension.handlers.JacksonTypeHandler;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.JsonNode;
-import jakarta.persistence.Column;
-import jakarta.persistence.Convert;
-import jakarta.persistence.Entity;
-import jakarta.persistence.EnumType;
-import jakarta.persistence.Enumerated;
-import jakarta.persistence.Id;
-import jakarta.persistence.PrePersist;
-import jakarta.persistence.PreUpdate;
-import jakarta.persistence.Table;
 
 import java.time.LocalDateTime;
 import java.util.UUID;
 
-@Entity
-@Table(name = "tasks")
+@TableName(value = "tasks", autoResultMap = true)
 public class Task {
-    @Id
-    @Column(length = 36)
-    private String id;
+    @TableId(type = IdType.INPUT)
+    private String id = UUID.randomUUID().toString();
     private String taskName;
     private String videoAPath;
     private String videoBPath;
-    @Enumerated(EnumType.STRING)
     private TaskStatus status = TaskStatus.PENDING;
     private Double similarityScore;
     private String modelId;
-    @Column(columnDefinition = "TEXT")
     private String prompt;
+    
+    @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createdAt;
+    
+    @TableField(fill = FieldFill.INSERT_UPDATE)
     private LocalDateTime updatedAt;
+    
     private Double inputTokens;
     private Double outputTokens;
     private Double videoADuration;
@@ -40,33 +38,23 @@ public class Task {
     private String videoBResolution;
     private Double videoASize;
     private Double videoBSize;
-    @Convert(converter = JsonNodeConverter.class)
-    @Column(columnDefinition = "TEXT")
+    
+    @TableField(typeHandler = JacksonTypeHandler.class)
     private JsonNode preprocessOptions;
-
-    @PrePersist
-    public void prePersist() {
-        if (id == null || id.isBlank()) id = UUID.randomUUID().toString();
-        LocalDateTime now = LocalDateTime.now();
-        if (createdAt == null) createdAt = now;
-        updatedAt = now;
-    }
-
-    @PreUpdate
-    public void preUpdate() {
-        updatedAt = LocalDateTime.now();
-    }
 
     public String getId() { return id; }
     public void setId(String id) { this.id = id; }
     public String getTaskName() { return taskName; }
     public void setTaskName(String taskName) { this.taskName = taskName; }
+    
     @JsonProperty("video_a_path")
     public String getVideoAPath() { return videoAPath; }
     public void setVideoAPath(String videoAPath) { this.videoAPath = videoAPath; }
+    
     @JsonProperty("video_b_path")
     public String getVideoBPath() { return videoBPath; }
     public void setVideoBPath(String videoBPath) { this.videoBPath = videoBPath; }
+    
     public TaskStatus getStatus() { return status; }
     public void setStatus(TaskStatus status) { this.status = status; }
     public Double getSimilarityScore() { return similarityScore; }
@@ -83,24 +71,31 @@ public class Task {
     public void setInputTokens(Double inputTokens) { this.inputTokens = inputTokens; }
     public Double getOutputTokens() { return outputTokens; }
     public void setOutputTokens(Double outputTokens) { this.outputTokens = outputTokens; }
+    
     @JsonProperty("video_a_duration")
     public Double getVideoADuration() { return videoADuration; }
     public void setVideoADuration(Double videoADuration) { this.videoADuration = videoADuration; }
+    
     @JsonProperty("video_b_duration")
     public Double getVideoBDuration() { return videoBDuration; }
     public void setVideoBDuration(Double videoBDuration) { this.videoBDuration = videoBDuration; }
+    
     @JsonProperty("video_a_resolution")
     public String getVideoAResolution() { return videoAResolution; }
     public void setVideoAResolution(String videoAResolution) { this.videoAResolution = videoAResolution; }
+    
     @JsonProperty("video_b_resolution")
     public String getVideoBResolution() { return videoBResolution; }
     public void setVideoBResolution(String videoBResolution) { this.videoBResolution = videoBResolution; }
+    
     @JsonProperty("video_a_size")
     public Double getVideoASize() { return videoASize; }
     public void setVideoASize(Double videoASize) { this.videoASize = videoASize; }
+    
     @JsonProperty("video_b_size")
     public Double getVideoBSize() { return videoBSize; }
     public void setVideoBSize(Double videoBSize) { this.videoBSize = videoBSize; }
+    
     public JsonNode getPreprocessOptions() { return preprocessOptions; }
     public void setPreprocessOptions(JsonNode preprocessOptions) { this.preprocessOptions = preprocessOptions; }
 }

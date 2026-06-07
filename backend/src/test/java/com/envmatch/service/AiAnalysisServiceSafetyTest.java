@@ -1,6 +1,6 @@
 package com.envmatch.service;
 
-import com.envmatch.repository.ModelCallLogRepository;
+import com.envmatch.mapper.ModelCallLogMapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
@@ -20,10 +20,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 
 class AiAnalysisServiceSafetyTest {
+
     private final ObjectMapper mapper = new ObjectMapper();
     private final AiAnalysisService service = new AiAnalysisService(
             mapper,
-            mock(ModelCallLogRepository.class),
+            mock(ModelCallLogMapper.class),
             "storage",
             16 * 1024 * 1024
     );
@@ -57,7 +58,7 @@ class AiAnalysisServiceSafetyTest {
     void rejectsInlineMediaWhenAggregateSizeExceedsLimit() throws Exception {
         AiAnalysisService limited = new AiAnalysisService(
                 mapper,
-                mock(ModelCallLogRepository.class),
+                mock(ModelCallLogMapper.class),
                 "storage",
                 10
         );
@@ -132,9 +133,36 @@ class AiAnalysisServiceSafetyTest {
         JsonNode content = payload.path("messages").path(0).path("content");
 
         assertThat(content).hasSize(3);
-        assertThat(content.path(0).path("text").asText()).contains("first image grid", "second image grid");
+        assertThat(content.path(0).path("text").asText()).contains("第一张合图", "第二张合图");
         assertThat(content.path(1).path("image_url").path("url").asText()).startsWith("data:image/jpeg;base64,");
         assertThat(content.path(2).path("image_url").path("url").asText()).startsWith("data:image/jpeg;base64,");
+    }
+
+    @Test
+    void minimaxImagePayloadUsesHybridFormat() throws Exception {
+        Path frameA = imageFile(160, 90, Color.RED);
+        Path frameB = imageFile(160, 90, Color.BLUE);
+        Method method = AiAnalysisService.class.getDeclaredMethod(
+                "buildPayload",
+                List.class, List.class, String.class, String.class, String.class, String.class,
+                boolean.class, boolean.class, String.class, String.class
+        );
+        method.setAccessible(true);
+        Object envelope = method.invoke(
+                service,
+                List.of(frameA.toString()), List.of(frameB.toString()), "compare", "MiniMax-M3",
+                "MiniMax", "image", false, false, "", ""
+        );
+        Method payloadAccessor = envelope.getClass().getDeclaredMethod("payload");
+        payloadAccessor.setAccessible(true);
+        JsonNode payload = (JsonNode) payloadAccessor.invoke(envelope);
+
+        JsonNode message = payload.path("messages").path(0);
+        assertThat(message.path("content").isTextual()).isTrue();
+        assertThat(message.path("content").asText()).contains("第一张合图", "第二张合图");
+        assertThat(message.path("images")).hasSize(1);
+        assertThat(message.path("images").get(0).asText()).isNotEmpty();
+        assertThat(message.path("images").get(0).asText()).doesNotStartWith("data:image");
     }
 
     private BufferedImage decode(String encoded) throws Exception {

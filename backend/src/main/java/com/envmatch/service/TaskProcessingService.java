@@ -1,12 +1,13 @@
 package com.envmatch.service;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.envmatch.model.AIModel;
 import com.envmatch.model.Task;
 import com.envmatch.model.TaskResult;
 import com.envmatch.model.TaskStatus;
-import com.envmatch.repository.AIModelRepository;
-import com.envmatch.repository.TaskRepository;
-import com.envmatch.repository.TaskResultRepository;
+import com.envmatch.mapper.AIModelMapper;
+import com.envmatch.mapper.TaskMapper;
+import com.envmatch.mapper.TaskResultMapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -28,25 +29,25 @@ import java.util.List;
 
 @Service
 public class TaskProcessingService {
-    private final TaskRepository taskRepository;
-    private final TaskResultRepository resultRepository;
-    private final AIModelRepository modelRepository;
+    private final TaskMapper taskMapper;
+    private final TaskResultMapper resultMapper;
+    private final AIModelMapper modelMapper;
     private final VideoService videoService;
     private final AiAnalysisService aiAnalysisService;
     private final ObjectMapper mapper;
     private final HttpClient httpClient;
     private final String webhookUrl;
 
-    public TaskProcessingService(TaskRepository taskRepository,
-                                 TaskResultRepository resultRepository,
-                                 AIModelRepository modelRepository,
+    public TaskProcessingService(TaskMapper taskMapper,
+                                 TaskResultMapper resultMapper,
+                                 AIModelMapper modelMapper,
                                  VideoService videoService,
                                  AiAnalysisService aiAnalysisService,
                                  ObjectMapper mapper,
                                  @Value("${envmatch.webhook-url:${WEBHOOK_URL:}}") String webhookUrl) {
-        this.taskRepository = taskRepository;
-        this.resultRepository = resultRepository;
-        this.modelRepository = modelRepository;
+        this.taskMapper = taskMapper;
+        this.resultMapper = resultMapper;
+        this.modelMapper = modelMapper;
         this.videoService = videoService;
         this.aiAnalysisService = aiAnalysisService;
         this.mapper = mapper;
@@ -58,10 +59,10 @@ public class TaskProcessingService {
     @Async("taskExecutor")
     public void processAsync(String taskId) {
         try {
-            Task task = taskRepository.findById(taskId).orElse(null);
+            Task task = taskMapper.selectById(taskId);
             if (task == null) return;
             task.setStatus(TaskStatus.PROCESSING);
-            taskRepository.save(task);
+            taskMapper.updateById(task);
 
             JsonNode opts = task.getPreprocessOptions();
             String samplingType = text(opts, "sampling_type", "fixed");
@@ -80,7 +81,7 @@ public class TaskProcessingService {
             task.setVideoBDuration(metaB.duration());
             task.setVideoBResolution(metaB.resolution());
             task.setVideoBSize(metaB.sizeMb());
-            taskRepository.save(task);
+            taskMapper.updateById(task);
 
             validateClipStart(clipStart, metaA, "A");
             validateClipStart(clipStart, metaB, "B");
@@ -105,7 +106,7 @@ public class TaskProcessingService {
                 task.setVideoASize(processedA.sizeMb());
                 task.setVideoBResolution(processedB.resolution());
                 task.setVideoBSize(processedB.sizeMb());
-                taskRepository.save(task);
+                taskMapper.updateById(task);
             }
 
             if ("image".equalsIgnoreCase(recognitionMode)) {
@@ -115,10 +116,12 @@ public class TaskProcessingService {
                 task.setVideoASize(infoA.sizeMb());
                 task.setVideoBResolution(infoB.resolution());
                 task.setVideoBSize(infoB.sizeMb());
-                taskRepository.save(task);
+                taskMapper.updateById(task);
             }
 
-            AIModel model = modelRepository.findFirstByIdentifier(task.getModelId()).orElse(null);
+            AIModel model = modelMapper.selectOne(new LambdaQueryWrapper<AIModel>()
+                    .eq(AIModel::getIdentifier, task.getModelId())
+                    .last("LIMIT 1"));
             AiAnalysisResponse response = aiAnalysisService.analyze(
                     framesA, framesB, task.getPrompt(),
                     model == null ? "" : model.getApiKey(),
@@ -135,11 +138,11 @@ public class TaskProcessingService {
             task.setOutputTokens(usage.path("completion_tokens").asDouble(usage.path("output_tokens").asDouble(0.0)));
             task.setStatus(response.error() == null ? TaskStatus.COMPLETED : TaskStatus.FAILED);
 
-            TaskResult taskResult = resultRepository.findById(taskId).orElseGet(() -> {
-                TaskResult r = new TaskResult();
-                r.setTaskId(taskId);
-                return r;
-            });
+            TaskResult taskResult = resultMapper.selectById(taskId);
+            if (taskResult == null) {
+                taskResult = new TaskResult();
+                taskResult.setTaskId(taskId);
+            }
             taskResult.setDimensionScores(result.path("dimension_scores"));
             taskResult.setSimilarPoints(result.path("similar_points"));
             taskResult.setDifferencePoints(result.path("difference_points"));
@@ -150,8 +153,8 @@ public class TaskProcessingService {
             taskResult.setInputTokens(task.getInputTokens());
             taskResult.setOutputTokens(task.getOutputTokens());
 
-            resultRepository.save(taskResult);
-            taskRepository.save(task);
+            saveOrUpdateResult(taskResult);
+            taskMapper.updateById(task);
             sendWebhook(task, taskResult);
         } catch (Exception e) {
             failTask(taskId, e.getMessage());
@@ -159,32 +162,40 @@ public class TaskProcessingService {
     }
 
     private void savePartialResult(String taskId, List<String> framesA, List<String> framesB) {
-        TaskResult result = resultRepository.findById(taskId).orElseGet(() -> {
-            TaskResult r = new TaskResult();
-            r.setTaskId(taskId);
-            return r;
-        });
+        TaskResult result = resultMapper.selectById(taskId);
+        if (result == null) {
+            result = new TaskResult();
+            result.setTaskId(taskId);
+        }
         result.setSummary("处理中...");
         result.setKeyFramesA(toArray(framesA));
         result.setKeyFramesB(toArray(framesB));
-        resultRepository.save(result);
+        saveOrUpdateResult(result);
     }
 
     private void failTask(String taskId, String message) {
-        Task task = taskRepository.findById(taskId).orElse(null);
+        Task task = taskMapper.selectById(taskId);
         if (task != null) {
             task.setStatus(TaskStatus.FAILED);
-            taskRepository.save(task);
+            taskMapper.updateById(task);
         }
-        TaskResult result = resultRepository.findById(taskId).orElseGet(() -> {
-            TaskResult r = new TaskResult();
-            r.setTaskId(taskId);
-            return r;
-        });
+        TaskResult result = resultMapper.selectById(taskId);
+        if (result == null) {
+            result = new TaskResult();
+            result.setTaskId(taskId);
+        }
         result.setErrorMessage(message);
         result.setSummary("分析过程终止: " + message);
-        resultRepository.save(result);
+        saveOrUpdateResult(result);
         if (task != null) sendWebhook(task, result);
+    }
+
+    private void saveOrUpdateResult(TaskResult result) {
+        if (resultMapper.selectById(result.getTaskId()) == null) {
+            resultMapper.insert(result);
+        } else {
+            resultMapper.updateById(result);
+        }
     }
 
     private void sendWebhook(Task task, TaskResult result) {

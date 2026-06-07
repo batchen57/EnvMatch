@@ -11,7 +11,7 @@ export function ResultReport() {
   const [stats, setStats] = useState<any>({
     total: 0, completed: 0, failed: 0, avg_similarity: 0,
     total_tokens: 0, total_duration: 0, total_size: 0,
-    avg_dimensions: { architecture: 0, vegetation: 0, lighting_weather: 0, facilities: 0, road_surface: 0 },
+    avg_dimensions: { indoor_layout: 0, wall_floor_material: 0, furniture_fixtures: 0, window_door_style: 0, lighting_environment: 0 },
     models_summary: [],
     distribution: { high: 0, medium: 0, low: 0 },
     trend: { dates: [], counts: [], similarities: [], tokens: [] }
@@ -38,11 +38,11 @@ export function ResultReport() {
     backgroundColor: 'transparent',
     radar: {
       indicator: [
-        { name: '建筑结构', max: 100 },
-        { name: '植被绿化', max: 100 },
-        { name: '光照天气', max: 100 },
-        { name: '设施物体', max: 100 },
-        { name: '道路地面', max: 100 }
+        { name: '室内布局', max: 100 },
+        { name: '墙地材质', max: 100 },
+        { name: '家具设施', max: 100 },
+        { name: '门窗样式', max: 100 },
+        { name: '光照环境', max: 100 }
       ],
       center: ['50%', '50%'],
       radius: '60%',
@@ -60,11 +60,11 @@ export function ResultReport() {
       type: 'radar',
       data: [{
         value: [
-          stats.avg_dimensions.architecture,
-          stats.avg_dimensions.vegetation,
-          stats.avg_dimensions.lighting_weather,
-          stats.avg_dimensions.facilities,
-          stats.avg_dimensions.road_surface
+          stats.avg_dimensions.indoor_layout,
+          stats.avg_dimensions.wall_floor_material,
+          stats.avg_dimensions.furniture_fixtures,
+          stats.avg_dimensions.window_door_style,
+          stats.avg_dimensions.lighting_environment
         ],
         name: '环境维度分布',
         areaStyle: {
@@ -455,11 +455,11 @@ function DistItemCompact({ label, count, color, total }: any) {
 
 function getDimLabel(key: string) {
   const labels: any = {
-    architecture: '建筑结构',
-    vegetation: '植被绿化',
-    lighting_weather: '光照天气',
-    facilities: '设施物体',
-    road_surface: '道路地面'
+    indoor_layout: '室内布局',
+    wall_floor_material: '墙地材质',
+    furniture_fixtures: '家具设施',
+    window_door_style: '门窗样式',
+    lighting_environment: '光照环境'
   };
   return labels[key] || key;
 }

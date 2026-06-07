@@ -115,11 +115,11 @@ export function ResultDetails() {
     const scoreColor = score > 70 ? '#10b981' : score > 40 ? '#f59e0b' : '#ef4444';
     const dims = result?.dimension_scores || {};
     const dimKeys: [string, string][] = [
-      ['光照/天气', 'lighting_weather'],
-      ['建筑风格', 'architecture'],
-      ['固定设施', 'facilities'],
-      ['植被绿化', 'vegetation'],
-      ['地面材质', 'road_surface'],
+      ['室内布局', 'indoor_layout'],
+      ['墙地材质', 'wall_floor_material'],
+      ['家具设施', 'furniture_fixtures'],
+      ['门窗样式', 'window_door_style'],
+      ['光照环境', 'lighting_environment'],
     ];
 
     // 1. Capture ECharts as PNG data URLs
@@ -344,11 +344,11 @@ export function ResultDetails() {
     backgroundColor: 'transparent',
     radar: {
       indicator: [
-        { name: '光照/天气', max: 100 },
-        { name: '建筑风格', max: 100 },
-        { name: '固定设施', max: 100 },
-        { name: '植被绿化', max: 100 },
-        { name: '地面材质', max: 100 }
+        { name: '室内布局', max: 100 },
+        { name: '墙地材质', max: 100 },
+        { name: '家具设施', max: 100 },
+        { name: '门窗样式', max: 100 },
+        { name: '光照环境', max: 100 }
       ],
       shape: 'circle', splitNumber: 4,
       axisName: { color: '#94a3b8', fontSize: 10 },
@@ -360,11 +360,11 @@ export function ResultDetails() {
       type: 'radar',
       data: [{
         value: [
-          dims.lighting_weather || 0,
-          dims.architecture || 0,
-          dims.facilities || 0,
-          dims.vegetation || 0,
-          dims.road_surface || 0
+          dims.indoor_layout || 0,
+          dims.wall_floor_material || 0,
+          dims.furniture_fixtures || 0,
+          dims.window_door_style || 0,
+          dims.lighting_environment || 0
         ],
         symbol: 'none',
         itemStyle: { color: '#10b981' },
@@ -406,11 +406,11 @@ export function ResultDetails() {
             <ReactECharts ref={radarChartRef} option={radarOption} style={{ height: '100%' }} />
           </div>
           <div className="w-full space-y-2">
-            <ScoreRow label="光照/天气" val={dims.lighting_weather} />
-            <ScoreRow label="建筑风格" val={dims.architecture} />
-            <ScoreRow label="固定设施" val={dims.facilities} />
-            <ScoreRow label="植被绿化" val={dims.vegetation} />
-            <ScoreRow label="地面材质" val={dims.road_surface} />
+            <ScoreRow label="室内布局" val={dims.indoor_layout} />
+            <ScoreRow label="墙地材质" val={dims.wall_floor_material} />
+            <ScoreRow label="家具设施" val={dims.furniture_fixtures} />
+            <ScoreRow label="门窗样式" val={dims.window_door_style} />
+            <ScoreRow label="光照环境" val={dims.lighting_environment} />
           </div>
         </div>
 

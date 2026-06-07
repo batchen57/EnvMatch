@@ -1,33 +1,29 @@
 package com.envmatch.model;
 
+import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableField;
+import com.baomidou.mybatisplus.annotation.TableId;
+import com.baomidou.mybatisplus.annotation.TableName;
+import com.baomidou.mybatisplus.extension.handlers.JacksonTypeHandler;
 import com.fasterxml.jackson.databind.JsonNode;
-import jakarta.persistence.Column;
-import jakarta.persistence.Convert;
-import jakarta.persistence.Entity;
-import jakarta.persistence.GeneratedValue;
-import jakarta.persistence.GenerationType;
-import jakarta.persistence.Id;
-import jakarta.persistence.Table;
 
 import java.time.LocalDateTime;
 
-@Entity
-@Table(name = "model_call_logs")
+@TableName(value = "model_call_logs", autoResultMap = true)
 public class ModelCallLog {
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @TableId(type = IdType.AUTO)
     private Long id;
     private String taskId;
     private String taskName;
     private String modelId;
-    @Column(columnDefinition = "TEXT")
     private String modelUrl;
-    @Convert(converter = JsonNodeConverter.class)
-    @Column(columnDefinition = "TEXT")
+    
+    @TableField(typeHandler = JacksonTypeHandler.class)
     private JsonNode requestPayload;
-    @Convert(converter = JsonNodeConverter.class)
-    @Column(columnDefinition = "TEXT")
+    
+    @TableField(typeHandler = JacksonTypeHandler.class)
     private JsonNode responseBody;
+    
     private LocalDateTime startedAt;
     private LocalDateTime endedAt;
     private String statusCode;

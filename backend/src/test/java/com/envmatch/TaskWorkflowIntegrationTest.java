@@ -1,12 +1,13 @@
 package com.envmatch;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.envmatch.model.AIModel;
 import com.envmatch.model.ModelCallLog;
 import com.envmatch.model.Task;
 import com.envmatch.model.TaskStatus;
-import com.envmatch.repository.AIModelRepository;
-import com.envmatch.repository.ModelCallLogRepository;
-import com.envmatch.repository.TaskRepository;
+import com.envmatch.mapper.AIModelMapper;
+import com.envmatch.mapper.ModelCallLogMapper;
+import com.envmatch.mapper.TaskMapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpServer;
@@ -17,7 +18,6 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.client.TestRestTemplate;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.core.io.ByteArrayResource;
-import org.springframework.data.domain.PageRequest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
@@ -60,13 +60,13 @@ class TaskWorkflowIntegrationTest {
     TestRestTemplate restTemplate;
 
     @Autowired
-    AIModelRepository modelRepository;
+    AIModelMapper modelMapper;
 
     @Autowired
-    ModelCallLogRepository logRepository;
+    ModelCallLogMapper logMapper;
 
     @Autowired
-    TaskRepository taskRepository;
+    TaskMapper taskMapper;
 
     @Autowired
     ObjectMapper mapper;
@@ -77,7 +77,41 @@ class TaskWorkflowIntegrationTest {
     @DynamicPropertySource
     static void properties(DynamicPropertyRegistry registry) {
         startMockServer();
-        registry.add("spring.datasource.url", () -> "jdbc:sqlite:" + TEST_ROOT.resolve("envmatch-test.db"));
+
+        String host = System.getenv().getOrDefault("DB_HOST", "localhost");
+        String port = System.getenv().getOrDefault("DB_PORT", "5432");
+        String user = System.getenv().getOrDefault("DB_USERNAME", "postgres");
+        String pass = System.getenv().getOrDefault("DB_PASSWORD", "postgres");
+
+        // 1. Connect to administrative database 'postgres' to try creating 'envmatch_test' database
+        String adminUrl = String.format("jdbc:postgresql://%s:%s/postgres", host, port);
+        try (java.sql.Connection conn = java.sql.DriverManager.getConnection(adminUrl, user, pass)) {
+            try (java.sql.Statement stmt = conn.createStatement()) {
+                stmt.execute("CREATE DATABASE envmatch_test");
+                System.out.println("Created test database envmatch_test");
+            }
+        } catch (Exception e) {
+            // Ignore if database already exists or other creation error, just proceed
+            System.out.println("Test database envmatch_test might already exist: " + e.getMessage());
+        }
+
+        // 2. Set database connection URL properties for Spring Boot to use envmatch_test
+        String testUrl = String.format("jdbc:postgresql://%s:%s/envmatch_test", host, port);
+        registry.add("spring.datasource.url", () -> testUrl);
+
+        // 3. Drop existing tables in envmatch_test to ensure a clean PostgreSQL schema initialization for testing
+        try (java.sql.Connection conn = java.sql.DriverManager.getConnection(testUrl, user, pass)) {
+            try (java.sql.Statement stmt = conn.createStatement()) {
+                stmt.execute("DROP TABLE IF EXISTS task_results CASCADE");
+                stmt.execute("DROP TABLE IF EXISTS tasks CASCADE");
+                stmt.execute("DROP TABLE IF EXISTS model_call_logs CASCADE");
+                stmt.execute("DROP TABLE IF EXISTS prompt_templates CASCADE");
+                stmt.execute("DROP TABLE IF EXISTS ai_models CASCADE");
+            }
+        } catch (Exception e) {
+            System.err.println("Could not drop tables in envmatch_test before test: " + e.getMessage());
+        }
+
         registry.add("envmatch.storage-dir", () -> TEST_ROOT.resolve("storage").toString());
         registry.add("envmatch.webhook-url", () -> "http://127.0.0.1:" + mockServer.getAddress().getPort() + "/webhook");
     }
@@ -98,7 +132,7 @@ class TaskWorkflowIntegrationTest {
         model.setBaseUrl("http://127.0.0.1:" + mockServer.getAddress().getPort() + "/v1");
         model.setCapabilities(mapper.readTree("[\"text\",\"image\"]"));
         model.setIsDefault("false");
-        modelRepository.save(model);
+        modelMapper.insert(model);
 
         MultiValueMap<String, Object> body = new LinkedMultiValueMap<>();
         body.add("task_name", "integration-task");
@@ -126,8 +160,12 @@ class TaskWorkflowIntegrationTest {
         JsonNode logs = restTemplate.getForObject(baseUrl() + "/model-logs/?search=" + identifier + "&skip=0&limit=5", JsonNode.class);
         assertThat(logs.path("total").asInt()).isGreaterThanOrEqualTo(1);
         assertThat(logs.path("logs").get(0).path("status_code").asText()).isEqualTo("200");
-        assertThat(logRepository.findByTaskNameContainingIgnoreCaseOrTaskIdContainingIgnoreCaseOrModelIdContainingIgnoreCase(
-                identifier, identifier, identifier, PageRequest.of(0, 5)).getTotalElements()).isGreaterThanOrEqualTo(1);
+
+        long count = logMapper.selectCount(new LambdaQueryWrapper<ModelCallLog>()
+                .like(ModelCallLog::getTaskName, identifier)
+                .or().like(ModelCallLog::getTaskId, identifier)
+                .or().like(ModelCallLog::getModelId, identifier));
+        assertThat(count).isGreaterThanOrEqualTo(1);
 
         assertThat(WEBHOOK_BODIES).anySatisfy(webhook -> {
             assertThat(webhook).contains(taskId);
@@ -137,7 +175,7 @@ class TaskWorkflowIntegrationTest {
         restTemplate.delete(baseUrl() + "/tasks/" + taskId);
         ResponseEntity<String> afterDelete = restTemplate.exchange(baseUrl() + "/tasks/" + taskId, HttpMethod.GET, HttpEntity.EMPTY, String.class);
         assertThat(afterDelete.getStatusCode().value()).isEqualTo(404);
-        assertThat(taskRepository.findById(taskId)).isEmpty();
+        assertThat(taskMapper.selectById(taskId)).isNull();
     }
 
     @Test
@@ -149,7 +187,7 @@ class TaskWorkflowIntegrationTest {
             log.setTaskName(marker);
             log.setModelId("model-" + i);
             log.setStartedAt(LocalDateTime.now().plusMinutes(i));
-            logRepository.save(log);
+            logMapper.insert(log);
         }
 
         JsonNode response = restTemplate.getForObject(
@@ -174,14 +212,14 @@ class TaskWorkflowIntegrationTest {
         Task currentTask = new Task();
         currentTask.setTaskName(marker + "-current-task");
         currentTask.setStatus(TaskStatus.PENDING);
-        currentTask = taskRepository.saveAndFlush(currentTask);
+        taskMapper.insert(currentTask);
 
         ModelCallLog legacyLog = new ModelCallLog();
         legacyLog.setTaskId(marker + "-legacy-log");
         legacyLog.setTaskName(marker);
         legacyLog.setModelId(marker);
         legacyLog.setStartedAt(LocalDateTime.of(2000, 1, 1, 0, 0));
-        legacyLog = logRepository.saveAndFlush(legacyLog);
+        logMapper.insert(legacyLog);
         jdbcTemplate.update(
                 "UPDATE model_call_logs SET started_at = '2000-01-01 00:00:00.000000' WHERE id = ?",
                 legacyLog.getId()
@@ -192,7 +230,7 @@ class TaskWorkflowIntegrationTest {
         currentLog.setTaskName(marker);
         currentLog.setModelId(marker);
         currentLog.setStartedAt(LocalDateTime.now());
-        currentLog = logRepository.saveAndFlush(currentLog);
+        logMapper.insert(currentLog);
 
         JsonNode tasks = restTemplate.getForObject(
                 baseUrl() + "/tasks/?status=PROCESSING&skip=0&limit=500",
@@ -206,8 +244,9 @@ class TaskWorkflowIntegrationTest {
         assertThat(tasks.path("tasks").get(0).path("id").asText()).isEqualTo(currentTask.getId());
         assertThat(logs.path("logs").get(0).path("id").asLong()).isEqualTo(currentLog.getId());
 
-        logRepository.deleteAll(List.of(currentLog, legacyLog));
-        taskRepository.delete(currentTask);
+        logMapper.deleteById(currentLog.getId());
+        logMapper.deleteById(legacyLog.getId());
+        taskMapper.deleteById(currentTask.getId());
         jdbcTemplate.update("DELETE FROM tasks WHERE id = ?", legacyTaskId);
     }
 
@@ -219,12 +258,12 @@ class TaskWorkflowIntegrationTest {
         Task pending = new Task();
         pending.setTaskName("pending-without-score");
         pending.setStatus(TaskStatus.PENDING);
-        pending = taskRepository.save(pending);
+        taskMapper.insert(pending);
 
         JsonNode after = restTemplate.getForObject(baseUrl() + "/dashboard-stats", JsonNode.class);
         assertThat(after.path("distribution").path("low").asInt()).isEqualTo(lowBefore);
 
-        taskRepository.delete(pending);
+        taskMapper.deleteById(pending.getId());
     }
 
     @Test

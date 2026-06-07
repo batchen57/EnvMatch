@@ -16,7 +16,7 @@ public class AsyncConfig {
                                  @Value("${envmatch.task-executor.queue-capacity:50}") int queueCapacity) {
         int normalizedCoreSize = Math.max(1, coreSize);
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
-        // 同时限制工作线程数和排队任务数，避免视频处理耗尽 JVM 线程或加剧 SQLite 锁竞争。
+        // 同时限制工作线程数和排队任务数，避免视频处理耗尽 JVM 线程或加剧数据库连接与锁竞争。
         executor.setCorePoolSize(normalizedCoreSize);
         executor.setMaxPoolSize(Math.max(normalizedCoreSize, maxSize));
         executor.setQueueCapacity(Math.max(1, queueCapacity));

@@ -136,7 +136,8 @@ export function ModelConfig() {
     { name: 'Qwen-VL-Max', provider: 'Alibaba', identifier: 'qwen-vl-max', base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1', description: '通义千问视觉大模型，视频理解能力强。', capabilities: ['text', 'image', 'video'] },
     { name: 'DeepSeek Chat', provider: 'DeepSeek', identifier: 'deepseek-chat', base_url: 'https://api.deepseek.com', description: '深度求索高性能模型，环境分析极具性价比。', capabilities: ['text'] },
     { name: 'GPT-4o', provider: 'OpenAI', identifier: 'gpt-4o', base_url: 'https://api.openai.com/v1', description: 'OpenAI 旗舰全能模型，推理能力卓越。', capabilities: ['text', 'image', 'video'] },
-    { name: 'MiniMax-M2.7', provider: 'MiniMax', identifier: 'abab6.5s-chat', base_url: 'https://api.minimax.chat/v1', description: '国产大模型新锐，文本与视觉理解均衡。', capabilities: ['text', 'image'] },
+    { name: 'MiniMax-M2.7', provider: 'MiniMax', identifier: 'MiniMax-M2.7', base_url: 'https://api.minimaxi.com/v1', description: '国产多模态模型，支持图片理解与环境分析。', capabilities: ['text', 'image'] },
+    { name: 'MiniMax-M3', provider: 'MiniMax', identifier: 'MiniMax-M3', base_url: 'https://api.minimaxi.com/v1', description: 'MiniMax 最新旗舰，原生多模态，100 万 Token 上下文。', capabilities: ['text', 'image', 'video'] },
   ];
 
   const handleApplyPreset = (presetName: string) => {

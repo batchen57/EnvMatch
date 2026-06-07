@@ -48,7 +48,7 @@ EnvMatch 提供两种核心识别模式，以适配不同的业务场景与模�
 ## 🛠️ 技术架构
 
 *   **前端**：React 19 + TypeScript 6 + Vite 8 + Tailwind CSS 4 + ECharts + dnd-kit
-*   **后端**：Java 17 + Spring Boot 3.3 + Spring Data JPA + SQLite
+*   **后端**：Java 17 + Spring Boot 3.3 + MyBatis-Plus + PostgreSQL
 *   **多媒体处理**：FFmpeg / FFprobe + Java ImageIO
 *   **AI 引擎**：Google Gemini API、OpenAI 兼容多模态接口及 MiniMax 原生 VLM 接口
 
@@ -66,8 +66,7 @@ cd backend
 mvn spring-boot:run
 ```
 
-后端默认监听 `http://localhost:8888`，数据库和上传文件分别保存到
-`backend/envmatch.db` 与 `backend/storage/`。
+后端默认监听 `http://localhost:8888`，数据库使用 PostgreSQL (`envmatch`)，上传文件保存到 `backend/storage/`。
 
 ### 3. 前端启动
 ```bash

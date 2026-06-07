@@ -11,6 +11,7 @@ export function ModelLogs() {
   const [page, setPage] = useState(1);
   const [limit] = useState(10);
   const [selectedLog, setSelectedLog] = useState<any>(null);
+  const [loadingDetail, setLoadingDetail] = useState(false);
   const [jsonView, setJsonView] = useState<{data: any, title: string} | null>(null);
   const [imageView, setImageView] = useState<{images: string[], title: string} | null>(null);
   const [focusedImgIdx, setFocusedImgIdx] = useState(0);
@@ -175,8 +176,8 @@ export function ModelLogs() {
     return Array.from(new Set(images));
   };
 
-  const fetchLogs = async () => {
-    setLoading(true);
+  const fetchLogs = async (showLoading = false) => {
+    if (showLoading) setLoading(true);
     try {
       const skip = (page - 1) * limit;
       const res = await fetch(
@@ -190,20 +191,35 @@ export function ModelLogs() {
     } catch (e) {
       console.error(e);
     } finally {
-      setLoading(false);
+      if (showLoading) setLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchLogs();
-    const interval = setInterval(fetchLogs, 5000);
+    fetchLogs(true);
+    const interval = setInterval(() => fetchLogs(false), 5000);
     return () => clearInterval(interval);
   }, [page, limit]);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
     setPage(1);
-    fetchLogs();
+    fetchLogs(true);
+  };
+
+  const handleShowDetail = async (log: any) => {
+    setSelectedLog(log);
+    setLoadingDetail(true);
+    try {
+      const res = await fetch(`http://localhost:8888/model-logs/${log.id}`);
+      if (!res.ok) throw new Error(`Failed to fetch log details: ${res.status}`);
+      const detail = await res.json();
+      setSelectedLog(detail);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoadingDetail(false);
+    }
   };
 
   const totalPages = Math.ceil(total / limit);
@@ -230,7 +246,7 @@ export function ModelLogs() {
           />
         </form>
         <button 
-          onClick={() => { setPage(1); fetchLogs(); }}
+          onClick={() => { setPage(1); fetchLogs(true); }}
           className="bg-primary text-primary-foreground px-4 py-2 rounded-lg text-sm font-medium hover:bg-primary/90 transition-colors"
         >
           查询
@@ -319,7 +335,7 @@ export function ModelLogs() {
                       </td>
                       <td className="px-6 py-4 text-right">
                         <button 
-                          onClick={() => setSelectedLog(log)}
+                          onClick={() => handleShowDetail(log)}
                           className="p-2 hover:bg-primary/10 hover:text-primary rounded-lg transition-colors"
                         >
                           <Eye className="w-4 h-4" />
@@ -415,56 +431,63 @@ export function ModelLogs() {
                   <DetailItem label="总耗时" val={`${((new Date(selectedLog.ended_at).getTime() - new Date(selectedLog.started_at).getTime()) / 1000).toFixed(2)}s`} />
                 </div>
 
-                <div className="space-y-4">
-                  <div className="relative group">
-                    <div className="flex items-center justify-between mb-2">
-                      <h4 className="text-xs font-bold text-blue-400 flex items-center gap-2 uppercase tracking-widest">
-                        <FileJson className="w-3.5 h-3.5" />
-                        Request Payload (模型入参)
-                      </h4>
-                      <div className="flex items-center gap-2">
-                        {selectedLog.request_payload && extractBase64Images(selectedLog.request_payload).length > 0 && (
+                {loadingDetail ? (
+                  <div className="flex flex-col items-center justify-center py-12 border border-border border-dashed rounded-xl bg-muted/20">
+                    <Loader2 className="w-8 h-8 animate-spin text-primary/50 mb-2" />
+                    <span className="text-sm text-muted-foreground font-medium">正在加载接口出入参明细...</span>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    <div className="relative group">
+                      <div className="flex items-center justify-between mb-2">
+                        <h4 className="text-xs font-bold text-blue-400 flex items-center gap-2 uppercase tracking-widest">
+                          <FileJson className="w-3.5 h-3.5" />
+                          Request Payload (模型入参)
+                        </h4>
+                        <div className="flex items-center gap-2">
+                          {selectedLog.request_payload && extractBase64Images(selectedLog.request_payload).length > 0 && (
+                            <button 
+                              onClick={() => setImageView({
+                                images: extractBase64Images(selectedLog.request_payload), 
+                                title: "入参图片 (Input Images)"
+                              })}
+                              className="p-1 hover:bg-indigo-500/20 rounded text-[10px] text-indigo-400 flex items-center gap-1 transition-colors"
+                            >
+                              <ImageIcon className="w-3 h-3" /> 查看入参图片
+                            </button>
+                          )}
                           <button 
-                            onClick={() => setImageView({
-                              images: extractBase64Images(selectedLog.request_payload), 
-                              title: "入参图片 (Input Images)"
-                            })}
-                            className="p-1 hover:bg-indigo-500/20 rounded text-[10px] text-indigo-400 flex items-center gap-1 transition-colors"
+                            onClick={() => setJsonView({data: selectedLog.request_payload, title: "模型入参 (Request Payload)"})}
+                            className="p-1 hover:bg-blue-500/20 rounded text-[10px] text-blue-400 flex items-center gap-1 transition-colors"
                           >
-                            <ImageIcon className="w-3 h-3" /> 查看入参图片
+                            <Eye className="w-3 h-3" /> 全屏查看
                           </button>
-                        )}
+                        </div>
+                      </div>
+                      <pre className="bg-muted/50 p-4 rounded-lg text-[11px] font-mono overflow-x-auto border border-border/50 max-h-64 whitespace-pre-wrap custom-scrollbar">
+                        {JSON.stringify(selectedLog.request_payload, null, 2)}
+                      </pre>
+                    </div>
+
+                    <div className="relative group">
+                      <div className="flex items-center justify-between mb-2">
+                        <h4 className="text-xs font-bold text-emerald-500 flex items-center gap-2 uppercase tracking-widest">
+                          <FileJson className="w-3.5 h-3.5" />
+                          Response Body (模型出参)
+                        </h4>
                         <button 
-                          onClick={() => setJsonView({data: selectedLog.request_payload, title: "模型入参 (Request Payload)"})}
-                          className="p-1 hover:bg-blue-500/20 rounded text-[10px] text-blue-400 flex items-center gap-1 transition-colors"
+                          onClick={() => setJsonView({data: selectedLog.response_body, title: "模型出参 (Response Body)"})}
+                          className="p-1 hover:bg-emerald-500/20 rounded text-[10px] text-emerald-500 flex items-center gap-1 transition-colors"
                         >
                           <Eye className="w-3 h-3" /> 全屏查看
                         </button>
                       </div>
+                      <pre className="bg-muted/50 p-4 rounded-lg text-[11px] font-mono overflow-x-auto border border-border/50 max-h-64 whitespace-pre-wrap custom-scrollbar">
+                        {JSON.stringify(selectedLog.response_body, null, 2)}
+                      </pre>
                     </div>
-                    <pre className="bg-muted/50 p-4 rounded-lg text-[11px] font-mono overflow-x-auto border border-border/50 max-h-64 whitespace-pre-wrap custom-scrollbar">
-                      {JSON.stringify(selectedLog.request_payload, null, 2)}
-                    </pre>
                   </div>
-
-                  <div className="relative group">
-                    <div className="flex items-center justify-between mb-2">
-                      <h4 className="text-xs font-bold text-emerald-500 flex items-center gap-2 uppercase tracking-widest">
-                        <FileJson className="w-3.5 h-3.5" />
-                        Response Body (模型出参)
-                      </h4>
-                      <button 
-                        onClick={() => setJsonView({data: selectedLog.response_body, title: "模型出参 (Response Body)"})}
-                        className="p-1 hover:bg-emerald-500/20 rounded text-[10px] text-emerald-500 flex items-center gap-1 transition-colors"
-                      >
-                        <Eye className="w-3 h-3" /> 全屏查看
-                      </button>
-                    </div>
-                    <pre className="bg-muted/50 p-4 rounded-lg text-[11px] font-mono overflow-x-auto border border-border/50 max-h-64 whitespace-pre-wrap custom-scrollbar">
-                      {JSON.stringify(selectedLog.response_body, null, 2)}
-                    </pre>
-                  </div>
-                </div>
+                )}
               </div>
 
               <div className="px-6 py-4 border-t border-border bg-muted/10 flex justify-end">

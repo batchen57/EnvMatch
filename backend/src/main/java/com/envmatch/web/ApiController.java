@@ -1,16 +1,17 @@
 package com.envmatch.web;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.envmatch.model.AIModel;
 import com.envmatch.model.ModelCallLog;
 import com.envmatch.model.PromptTemplate;
 import com.envmatch.model.Task;
 import com.envmatch.model.TaskResult;
 import com.envmatch.model.TaskStatus;
-import com.envmatch.repository.AIModelRepository;
-import com.envmatch.repository.ModelCallLogRepository;
-import com.envmatch.repository.PromptTemplateRepository;
-import com.envmatch.repository.TaskRepository;
-import com.envmatch.repository.TaskResultRepository;
+import com.envmatch.mapper.AIModelMapper;
+import com.envmatch.mapper.ModelCallLogMapper;
+import com.envmatch.mapper.PromptTemplateMapper;
+import com.envmatch.mapper.TaskMapper;
+import com.envmatch.mapper.TaskResultMapper;
 import com.envmatch.service.SeedService;
 import com.envmatch.service.StorageService;
 import com.envmatch.service.TaskProcessingService;
@@ -55,30 +56,30 @@ import static org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE;
 
 @RestController
 public class ApiController {
-    private final TaskRepository taskRepository;
-    private final TaskResultRepository resultRepository;
-    private final AIModelRepository modelRepository;
-    private final PromptTemplateRepository promptRepository;
-    private final ModelCallLogRepository logRepository;
+    private final TaskMapper taskMapper;
+    private final TaskResultMapper resultMapper;
+    private final AIModelMapper modelMapper;
+    private final PromptTemplateMapper promptMapper;
+    private final ModelCallLogMapper logMapper;
     private final StorageService storageService;
     private final TaskProcessingService taskProcessingService;
     private final SeedService seedService;
     private final ObjectMapper mapper;
 
-    public ApiController(TaskRepository taskRepository,
-                         TaskResultRepository resultRepository,
-                         AIModelRepository modelRepository,
-                         PromptTemplateRepository promptRepository,
-                         ModelCallLogRepository logRepository,
+    public ApiController(TaskMapper taskMapper,
+                         TaskResultMapper resultMapper,
+                         AIModelMapper modelMapper,
+                         PromptTemplateMapper promptMapper,
+                         ModelCallLogMapper logMapper,
                          StorageService storageService,
                          TaskProcessingService taskProcessingService,
                          SeedService seedService,
                          ObjectMapper mapper) {
-        this.taskRepository = taskRepository;
-        this.resultRepository = resultRepository;
-        this.modelRepository = modelRepository;
-        this.promptRepository = promptRepository;
-        this.logRepository = logRepository;
+        this.taskMapper = taskMapper;
+        this.resultMapper = resultMapper;
+        this.modelMapper = modelMapper;
+        this.promptMapper = promptMapper;
+        this.logMapper = logMapper;
         this.storageService = storageService;
         this.taskProcessingService = taskProcessingService;
         this.seedService = seedService;
@@ -106,7 +107,21 @@ public class ApiController {
         task.setTaskName(taskName);
         task.setStatus(TaskStatus.PENDING);
         task.setModelId(modelId);
-        task.setPrompt(prompt);
+
+        String taskPrompt = prompt;
+        if (taskPrompt == null || taskPrompt.isBlank()) {
+            seedService.ensurePrompts();
+            List<PromptTemplate> templates = promptMapper.selectList(new LambdaQueryWrapper<PromptTemplate>()
+                    .orderByDesc(PromptTemplate::getCreatedAt));
+            if (!templates.isEmpty()) {
+                PromptTemplate defaultTemplate = templates.stream()
+                        .filter(t -> "系统默认通用提示词".equals(t.getName()))
+                        .findFirst()
+                        .orElse(templates.get(0));
+                taskPrompt = defaultTemplate.getContent();
+            }
+        }
+        task.setPrompt(taskPrompt);
         task.setPreprocessOptions(parsePreprocessOptions(preprocessOptions));
 
         try {
@@ -115,7 +130,7 @@ public class ApiController {
             bPath = storageService.saveUpload(videoB, taskId, "B");
             task.setVideoAPath(aPath.toString());
             task.setVideoBPath(bPath.toString());
-            taskRepository.saveAndFlush(task);
+            saveOrUpdateTask(task);
             taskProcessingService.processAsync(taskId);
             return Map.of("task_id", taskId, "message", "Task created successfully");
         } catch (TaskRejectedException e) {
@@ -130,8 +145,11 @@ public class ApiController {
 
     @GetMapping("/tasks/{taskId}")
     public Map<String, Object> getTask(@PathVariable String taskId) {
-        Task task = taskRepository.findById(taskId).orElseThrow(() -> new ResponseStatusException(NOT_FOUND, "Task not found"));
-        TaskResult result = resultRepository.findById(taskId).orElse(null);
+        Task task = taskMapper.selectById(taskId);
+        if (task == null) {
+            throw new ResponseStatusException(NOT_FOUND, "Task not found");
+        }
+        TaskResult result = resultMapper.selectById(taskId);
         Map<String, Object> response = new LinkedHashMap<>();
         response.put("task", task);
         response.put("result", result);
@@ -140,15 +158,18 @@ public class ApiController {
 
     @DeleteMapping("/tasks/{taskId}")
     public Map<String, String> deleteTask(@PathVariable String taskId) {
-        Task task = taskRepository.findById(taskId).orElseThrow(() -> new ResponseStatusException(NOT_FOUND, "Task not found"));
+        Task task = taskMapper.selectById(taskId);
+        if (task == null) {
+            throw new ResponseStatusException(NOT_FOUND, "Task not found");
+        }
         deletePath(task.getVideoAPath());
         deletePath(task.getVideoBPath());
         deletePath(storageService.storageDir().resolve(taskId + "_A_frames").toString());
         deletePath(storageService.storageDir().resolve(taskId + "_B_frames").toString());
         deletePath(storageService.storageDir().resolve(taskId + "_A_processed.mp4").toString());
         deletePath(storageService.storageDir().resolve(taskId + "_B_processed.mp4").toString());
-        resultRepository.deleteById(taskId);
-        taskRepository.delete(task);
+        resultMapper.deleteById(taskId);
+        taskMapper.deleteById(taskId);
         return Map.of("status", "success", "message", "Task " + taskId + " deleted");
     }
 
@@ -160,29 +181,32 @@ public class ApiController {
         int safeLimit = Math.min(500, Math.max(1, limit));
         List<Task> tasks;
         if (status == null || status.equals("ALL")) {
-            tasks = taskRepository.findPage(safeSkip, safeLimit);
+            tasks = taskMapper.findPage(safeSkip, safeLimit);
         } else if (status.equals("PROCESSING")) {
-            tasks = taskRepository.findProcessingPage(safeSkip, safeLimit);
+            tasks = taskMapper.findProcessingPage(safeSkip, safeLimit);
         } else {
             try {
                 TaskStatus.valueOf(status);
             } catch (IllegalArgumentException e) {
                 throw new ResponseStatusException(BAD_REQUEST, "Unsupported task status: " + status);
             }
-            tasks = taskRepository.findPageByStatus(status, safeSkip, safeLimit);
+            tasks = taskMapper.findPageByStatus(status, safeSkip, safeLimit);
         }
 
         Map<String, Long> counts = new LinkedHashMap<>();
-        counts.put("ALL", taskRepository.count());
-        counts.put("PROCESSING", taskRepository.countByStatusIn(List.of(TaskStatus.PENDING, TaskStatus.PROCESSING)));
-        counts.put("COMPLETED", taskRepository.countByStatus(TaskStatus.COMPLETED));
-        counts.put("FAILED", taskRepository.countByStatus(TaskStatus.FAILED));
+        counts.put("ALL", (long) taskMapper.selectCount(null));
+        counts.put("PROCESSING", (long) taskMapper.selectCount(new LambdaQueryWrapper<Task>()
+                .in(Task::getStatus, List.of(TaskStatus.PENDING, TaskStatus.PROCESSING))));
+        counts.put("COMPLETED", (long) taskMapper.selectCount(new LambdaQueryWrapper<Task>()
+                .eq(Task::getStatus, TaskStatus.COMPLETED)));
+        counts.put("FAILED", (long) taskMapper.selectCount(new LambdaQueryWrapper<Task>()
+                .eq(Task::getStatus, TaskStatus.FAILED)));
         return Map.of("tasks", tasks, "total_counts", counts);
     }
 
     @GetMapping("/dashboard-stats")
     public Map<String, Object> dashboardStats() {
-        List<Task> tasks = taskRepository.findAll();
+        List<Task> tasks = taskMapper.selectList(null);
         List<Task> completed = tasks.stream().filter(t -> t.getStatus() == TaskStatus.COMPLETED).toList();
         double avgSimilarity = completed.stream().map(Task::getSimilarityScore).filter(v -> v != null).mapToDouble(Double::doubleValue).average().orElse(0.0);
         double totalTokens = tasks.stream().mapToDouble(t -> nz(t.getInputTokens()) + nz(t.getOutputTokens())).sum();
@@ -204,7 +228,7 @@ public class ApiController {
         response.put("total_tokens", (int) totalTokens);
         response.put("total_duration", round(totalDuration, 1));
         response.put("total_size", round(totalSize, 1));
-        response.put("avg_dimensions", averageDimensions(resultRepository.findAll()));
+        response.put("avg_dimensions", averageDimensions(resultMapper.selectList(null)));
         response.put("models_summary", modelSummary(tasks));
         response.put("distribution", distribution);
         response.put("trend", trend(tasks));
@@ -236,7 +260,8 @@ public class ApiController {
     @GetMapping("/prompt-templates/")
     public List<PromptTemplate> listPromptTemplates() {
         seedService.ensurePrompts();
-        return promptRepository.findAllByOrderByCreatedAtDesc();
+        return promptMapper.selectList(new LambdaQueryWrapper<PromptTemplate>()
+                .orderByDesc(PromptTemplate::getCreatedAt));
     }
 
     @PostMapping("/prompt-templates/")
@@ -245,31 +270,39 @@ public class ApiController {
         PromptTemplate template = new PromptTemplate();
         template.setName(body.name().trim());
         template.setContent(body.content());
-        return promptRepository.save(template);
+        promptMapper.insert(template);
+        return template;
     }
 
     @PutMapping("/prompt-templates/{templateId}")
     public PromptTemplate updatePromptTemplate(@PathVariable String templateId,
                                                @RequestBody PromptTemplateRequest body) {
         validatePromptRequest(body);
-        PromptTemplate template = promptRepository.findById(templateId)
-                .orElseThrow(() -> new ResponseStatusException(NOT_FOUND, "Template not found"));
+        PromptTemplate template = promptMapper.selectById(templateId);
+        if (template == null) {
+            throw new ResponseStatusException(NOT_FOUND, "Template not found");
+        }
         template.setName(body.name().trim());
         template.setContent(body.content());
-        return promptRepository.save(template);
+        promptMapper.updateById(template);
+        return template;
     }
 
     @DeleteMapping("/prompt-templates/{templateId}")
     public Map<String, String> deletePromptTemplate(@PathVariable String templateId) {
-        if (!promptRepository.existsById(templateId)) throw new ResponseStatusException(NOT_FOUND, "Template not found");
-        promptRepository.deleteById(templateId);
+        if (promptMapper.selectById(templateId) == null) {
+            throw new ResponseStatusException(NOT_FOUND, "Template not found");
+        }
+        promptMapper.deleteById(templateId);
         return Map.of("status", "ok");
     }
 
     @GetMapping("/models/")
     public List<AIModel> listModels() {
         seedService.ensureModels();
-        return modelRepository.findAllByOrderBySortOrderAscCreatedAtDesc();
+        return modelMapper.selectList(new LambdaQueryWrapper<AIModel>()
+                .orderByAsc(AIModel::getSortOrder)
+                .orderByDesc(AIModel::getCreatedAt));
     }
 
     @PostMapping("/models/")
@@ -279,24 +312,30 @@ public class ApiController {
         if ("true".equals(body.isDefaultOrFalse())) clearDefaults(null);
         AIModel model = new AIModel();
         applyModelRequest(model, body);
-        return modelRepository.save(model);
+        modelMapper.insert(model);
+        return model;
     }
 
     @PutMapping("/models/{modelId}")
     public AIModel updateModel(@PathVariable String modelId, @RequestBody AIModelRequest body) {
         validateModelRequest(body);
         validateCapabilities(body.capabilities());
-        AIModel model = modelRepository.findById(modelId)
-                .orElseThrow(() -> new ResponseStatusException(NOT_FOUND, "Model not found"));
+        AIModel model = modelMapper.selectById(modelId);
+        if (model == null) {
+            throw new ResponseStatusException(NOT_FOUND, "Model not found");
+        }
         if ("true".equals(body.isDefaultOrFalse())) clearDefaults(modelId);
         applyModelRequest(model, body);
-        return modelRepository.save(model);
+        modelMapper.updateById(model);
+        return model;
     }
 
     @DeleteMapping("/models/{modelId}")
     public Map<String, String> deleteModel(@PathVariable String modelId) {
-        if (!modelRepository.existsById(modelId)) throw new ResponseStatusException(NOT_FOUND, "Model not found");
-        modelRepository.deleteById(modelId);
+        if (modelMapper.selectById(modelId) == null) {
+            throw new ResponseStatusException(NOT_FOUND, "Model not found");
+        }
+        modelMapper.deleteById(modelId);
         return Map.of("status", "ok");
     }
 
@@ -309,14 +348,23 @@ public class ApiController {
         List<ModelCallLog> logs;
         long total;
         if (search == null || search.isBlank()) {
-            logs = logRepository.findPage(safeSkip, safeLimit);
-            total = logRepository.count();
+            logs = logMapper.findPage(safeSkip, safeLimit);
+            total = logMapper.selectCount(null);
         } else {
             String pattern = "%" + search.trim() + "%";
-            logs = logRepository.searchPage(pattern, safeSkip, safeLimit);
-            total = logRepository.countSearch(pattern);
+            logs = logMapper.searchPage(pattern, safeSkip, safeLimit);
+            total = logMapper.countSearch(pattern);
         }
         return Map.of("logs", logs, "total", total);
+    }
+
+    @GetMapping("/model-logs/{id}")
+    public ModelCallLog getModelLog(@PathVariable Long id) {
+        ModelCallLog log = logMapper.selectById(id);
+        if (log == null) {
+            throw new ResponseStatusException(NOT_FOUND, "Model call log not found");
+        }
+        return log;
     }
 
     private JsonNode parsePreprocessOptions(String raw) {
@@ -421,19 +469,29 @@ public class ApiController {
     }
 
     private void cleanupFailedCreation(String taskId, Path aPath, Path bPath) {
-        // 文件存储与 SQLite 无法共享同一事务，因此使用幂等补偿清理创建过程中的部分成功状态。
+        // 文件存储与数据库无法共享同一事务，因此使用幂等补偿清理创建过程中的部分成功状态。
         deletePath(aPath == null ? null : aPath.toString());
         deletePath(bPath == null ? null : bPath.toString());
-        resultRepository.findById(taskId).ifPresent(resultRepository::delete);
-        taskRepository.findById(taskId).ifPresent(taskRepository::delete);
+        resultMapper.deleteById(taskId);
+        taskMapper.deleteById(taskId);
     }
 
     private void clearDefaults(String exceptId) {
-        for (AIModel model : modelRepository.findByIsDefault("true")) {
+        List<AIModel> defaults = modelMapper.selectList(new LambdaQueryWrapper<AIModel>()
+                .eq(AIModel::getIsDefault, "true"));
+        for (AIModel model : defaults) {
             if (exceptId == null || !exceptId.equals(model.getId())) {
                 model.setIsDefault("false");
-                modelRepository.save(model);
+                modelMapper.updateById(model);
             }
+        }
+    }
+
+    private void saveOrUpdateTask(Task task) {
+        if (taskMapper.selectById(task.getId()) == null) {
+            taskMapper.insert(task);
+        } else {
+            taskMapper.updateById(task);
         }
     }
 
@@ -468,7 +526,7 @@ public class ApiController {
     }
 
     private Map<String, Double> averageDimensions(List<TaskResult> results) {
-        List<String> keys = List.of("architecture", "vegetation", "lighting_weather", "facilities", "road_surface");
+        List<String> keys = List.of("indoor_layout", "wall_floor_material", "furniture_fixtures", "window_door_style", "lighting_environment");
         Map<String, Double> sums = new LinkedHashMap<>();
         keys.forEach(k -> sums.put(k, 0.0));
         if (results.isEmpty()) return sums;
@@ -507,7 +565,7 @@ public class ApiController {
             dates.add(day.format(fmt));
             counts.add(dayTasks.size());
             similarities.add(round(dayTasks.stream().filter(t -> t.getStatus() == TaskStatus.COMPLETED)
-                    .map(Task::getSimilarityScore).filter(v -> v != null).mapToDouble(Double::doubleValue).average().orElse(0.0), 1));
+                     .map(Task::getSimilarityScore).filter(v -> v != null).mapToDouble(Double::doubleValue).average().orElse(0.0), 1));
             tokens.add((int) dayTasks.stream().mapToDouble(t -> nz(t.getInputTokens()) + nz(t.getOutputTokens())).sum());
         }
         return Map.of("dates", dates, "counts", counts, "similarities", similarities, "tokens", tokens);

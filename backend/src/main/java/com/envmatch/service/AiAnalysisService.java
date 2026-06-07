@@ -1,7 +1,7 @@
 package com.envmatch.service;
 
 import com.envmatch.model.ModelCallLog;
-import com.envmatch.repository.ModelCallLogRepository;
+import com.envmatch.mapper.ModelCallLogMapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -55,23 +55,31 @@ public class AiAnalysisService {
     private static final double QWEN_VIDEO_TOTAL_PIXELS = 131072.0 * 32 * 32;
 
     private static final String DEFAULT_PROMPT = """
-            You are a professional video environment similarity analyst. Ignore people, foreground subjects,
-            and actions. Focus only on comparing the background environment of the two materials.
-            Return JSON only, without Markdown or explanatory text.
+            你是一名反欺诈调查中的环境鉴定专家。你的核心任务是判断两段视频/关键帧是否拍摄于同一个物理空间（如同一间房屋、门店、办公室），
+            以识别中介团伙反复使用同一场地进行虚假申请的行为。
+
+            【分析原则】
+            1. 完全忽略画面中的人物、手持物品、手机/电脑屏幕内容、临时摆放的文件等前景干扰。
+            2. 聚焦不可移动或难以短期更改的固定环境特征。
+            3. 重点关注：墙面颜色/纹理/壁纸、地板/地砖材质与纹理、门窗框架与把手样式、天花板与灯具、
+               开关面板/插座位置、固定家具（橱柜/嵌入式衣柜）、空间布局与房间结构。
+            4. 如果两个环境高度相似（得分≥80），请在 similar_points 中列出具体匹配的固定特征作为证据。
+
+            仅返回严格 JSON，不要包含 Markdown 代码块标记或任何解释性文字。
             """;
 
     private final ObjectMapper mapper;
-    private final ModelCallLogRepository logRepository;
+    private final ModelCallLogMapper logMapper;
     private final HttpClient httpClient;
     private final Path storageDir;
     private final long maxInlineMediaBytes;
 
     public AiAnalysisService(ObjectMapper mapper,
-                             ModelCallLogRepository logRepository,
+                             ModelCallLogMapper logMapper,
                              @Value("${envmatch.storage-dir:storage}") String storageDir,
                              @Value("${envmatch.ai.max-inline-media-bytes:16777216}") long maxInlineMediaBytes) {
         this.mapper = mapper;
-        this.logRepository = logRepository;
+        this.logMapper = logMapper;
         this.httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(20)).build();
         this.storageDir = Path.of(storageDir).toAbsolutePath().normalize();
         this.maxInlineMediaBytes = Math.max(0, maxInlineMediaBytes);
@@ -98,6 +106,9 @@ public class AiAnalysisService {
 
         LocalDateTime startedAt = LocalDateTime.now();
         String requestUrl = baseUrl == null ? "" : baseUrl;
+        if ("MiniMax-M2.7".equalsIgnoreCase(modelId) && "https://api.minimaxi.com/v1".equals(requestUrl.replaceAll("/+$", ""))) {
+            requestUrl = "https://api.minimaxi.com/v1/coding_plan/vlm";
+        }
         boolean nativeVlm = requestUrl.contains("/coding_plan/vlm");
         if (gemini) {
             requestUrl = geminiGenerateContentUrl(requestUrl, modelId, apiKey);
@@ -160,19 +171,19 @@ public class AiAnalysisService {
         String base = (prompt == null || prompt.isBlank()) ? DEFAULT_PROMPT : prompt;
         return base + """
 
-                Compare video A and video B strictly for environmental similarity, and return JSON:
+                严格对比素材 A 和素材 B 的拍摄环境，判断是否为同一物理空间。返回如下 JSON 结构：
                 {
                   "similarity_score": 85,
                   "dimension_scores": {
-                    "lighting_weather": 80,
-                    "architecture": 90,
-                    "facilities": 70,
-                    "vegetation": 85,
-                    "road_surface": 100
+                    "indoor_layout": 80,
+                    "wall_floor_material": 90,
+                    "furniture_fixtures": 70,
+                    "window_door_style": 85,
+                    "lighting_environment": 75
                   },
-                  "similar_points": ["similar point"],
-                  "difference_points": ["difference point"],
-                  "summary": "overall analysis"
+                  "similar_points": ["两段视频中均可见相同花纹的米色壁纸和白色踢脚线"],
+                  "difference_points": ["视频A中桌面有一台笔记本电脑，视频B中没有（属前景差异，不影响环境判断）"],
+                  "summary": "综合分析：两段视频大概率拍摄于同一室内空间，墙面装饰、地板材质和空间结构高度一致。"
                 }
                 """;
     }
@@ -204,17 +215,16 @@ public class AiAnalysisService {
 
         payload.put("model", modelId);
         payload.put("temperature", 0.1);
-        payload.put("max_tokens", 1024);
+        payload.put("max_tokens", "MiniMax".equalsIgnoreCase(provider) ? 4096 : 1024);
         ArrayNode messages = payload.putArray("messages");
         ObjectNode user = messages.addObject();
         user.put("role", "user");
 
-        boolean minimax = "MiniMax".equalsIgnoreCase(provider) || modelId.toLowerCase(Locale.ROOT).contains("minimax");
-        if (minimax && !"video".equalsIgnoreCase(recognitionMode)) {
+        boolean isMiniMax = "MiniMax".equalsIgnoreCase(provider) || (modelId != null && modelId.toLowerCase(Locale.ROOT).contains("minimax"));
+        if (isMiniMax) {
             user.put("content", imageComparisonPrompt(prompt));
             ArrayNode images = user.putArray("images");
-            images.add(frameGridBase64(framesA, "A"));
-            images.add(frameGridBase64(framesB, "B"));
+            images.add(nativeComparisonGridBase64(framesA, framesB));
             return new PayloadEnvelope(payload, false);
         }
 
@@ -295,9 +305,11 @@ public class AiAnalysisService {
 
     private String imageComparisonPrompt(String prompt) {
         return """
-                The first image grid contains frames from video A. The second image grid contains frames from video B.
-                Frames in each grid are ordered from left to right and top to bottom, covering the clip from start to end.
-                Compare corresponding time positions (A1 with B1, A2 with B2, and so on) while focusing on the environment.
+                第一张合图包含素材 A 的关键帧，第二张合图包含素材 B 的关键帧。
+                帧按从左到右、从上到下排列，覆盖视频片段的时间线。
+                请逐一对比对应时间位置的帧（A1 对 B1、A2 对 B2，依此类推），
+                聚焦背景环境中的固定特征（墙面、地面、门窗、灯具、家具布局），
+                忽略人物和可移动物品，判断两组帧是否拍摄于同一物理空间。
 
                 """ + prompt;
     }
@@ -476,6 +488,7 @@ public class AiAnalysisService {
 
     private JsonNode parseJsonResult(String answer) throws Exception {
         String text = answer == null ? "" : answer.trim();
+        text = text.replaceAll("(?i)<think>[\\s\\S]*?</think>", "").trim();
         Matcher fencedMatcher = Pattern.compile("```(?:json)?\\s*([\\s\\S]*?)\\s*```", Pattern.CASE_INSENSITIVE).matcher(text);
         if (fencedMatcher.find()) text = fencedMatcher.group(1).trim();
         if (!text.startsWith("{")) {
@@ -492,11 +505,11 @@ public class AiAnalysisService {
         ObjectNode normalized = ((ObjectNode) raw).deepCopy();
         JsonNode d = raw.path("dimension_scores");
         ObjectNode dims = mapper.createObjectNode();
-        dims.put("lighting_weather", number(d, "lighting_weather", "光照天气", "天气光线"));
-        dims.put("architecture", number(d, "architecture", "建筑风格"));
-        dims.put("facilities", number(d, "facilities", "固定设施"));
-        dims.put("vegetation", number(d, "vegetation", "植被绿化", "地貌植被"));
-        dims.put("road_surface", number(d, "road_surface", "地面材质"));
+        dims.put("indoor_layout", number(d, "indoor_layout", "室内布局", "空间布局", "architecture", "建筑风格"));
+        dims.put("wall_floor_material", number(d, "wall_floor_material", "墙地材质", "road_surface", "地面材质"));
+        dims.put("furniture_fixtures", number(d, "furniture_fixtures", "家具设施", "facilities", "固定设施"));
+        dims.put("window_door_style", number(d, "window_door_style", "门窗样式", "vegetation", "植被绿化"));
+        dims.put("lighting_environment", number(d, "lighting_environment", "光照环境", "lighting_weather", "光照天气", "天气光线"));
         normalized.set("dimension_scores", dims);
         if (!normalized.has("similar_points")) normalized.set("similar_points", mapper.createArrayNode());
         if (!normalized.has("difference_points")) normalized.set("difference_points", mapper.createArrayNode());
@@ -676,12 +689,13 @@ public class AiAnalysisService {
             log.setTaskId(taskId);
             log.setTaskName(taskName);
             log.setModelId(modelId);
-            // 保留审计所需的元数据，但禁止将访问凭证和二进制载荷持久化到 SQLite。
+            // 保留审计所需的元数据，但禁止将访问凭证和二进制载荷持久化到数据库。
             log.setModelUrl(redactUrl(modelUrl));
             log.setRequestPayload(sanitizeForLog(requestPayload));
             log.setStartedAt(startedAt);
             log.setStatusCode("PROCESSING");
-            return logRepository.saveAndFlush(log);
+            logMapper.insert(log);
+            return log;
         } catch (Exception e) {
             LOGGER.warn("Failed to start model call log for task {}", taskId, e);
             return null;
@@ -697,7 +711,7 @@ public class AiAnalysisService {
             log.setStatusCode(String.valueOf(statusCode));
             log.setInputTokens(inputTokens);
             log.setOutputTokens(outputTokens);
-            logRepository.save(log);
+            logMapper.updateById(log);
         } catch (Exception e) {
             LOGGER.warn("Failed to finish model call log for task {}", log.getTaskId(), e);
         }

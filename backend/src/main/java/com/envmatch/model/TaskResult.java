@@ -1,36 +1,34 @@
 package com.envmatch.model;
 
+import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableField;
+import com.baomidou.mybatisplus.annotation.TableId;
+import com.baomidou.mybatisplus.annotation.TableName;
+import com.baomidou.mybatisplus.extension.handlers.JacksonTypeHandler;
 import com.fasterxml.jackson.databind.JsonNode;
-import jakarta.persistence.Column;
-import jakarta.persistence.Convert;
-import jakarta.persistence.Entity;
-import jakarta.persistence.Id;
-import jakarta.persistence.Table;
 
-@Entity
-@Table(name = "task_results")
+@TableName(value = "task_results", autoResultMap = true)
 public class TaskResult {
-    @Id
-    @Column(length = 36)
+    @TableId(value = "task_id", type = IdType.INPUT)
     private String taskId;
-    @Convert(converter = JsonNodeConverter.class)
-    @Column(columnDefinition = "TEXT")
+    
+    @TableField(typeHandler = JacksonTypeHandler.class)
     private JsonNode dimensionScores;
-    @Convert(converter = JsonNodeConverter.class)
-    @Column(columnDefinition = "TEXT")
+    
+    @TableField(typeHandler = JacksonTypeHandler.class)
     private JsonNode similarPoints;
-    @Convert(converter = JsonNodeConverter.class)
-    @Column(columnDefinition = "TEXT")
+    
+    @TableField(typeHandler = JacksonTypeHandler.class)
     private JsonNode differencePoints;
-    @Column(columnDefinition = "TEXT")
+    
     private String summary;
-    @Convert(converter = JsonNodeConverter.class)
-    @Column(columnDefinition = "TEXT")
+    
+    @TableField(typeHandler = JacksonTypeHandler.class)
     private JsonNode keyFramesA;
-    @Convert(converter = JsonNodeConverter.class)
-    @Column(columnDefinition = "TEXT")
+    
+    @TableField(typeHandler = JacksonTypeHandler.class)
     private JsonNode keyFramesB;
-    @Column(columnDefinition = "TEXT")
+    
     private String errorMessage;
     private Double inputTokens;
     private Double outputTokens;

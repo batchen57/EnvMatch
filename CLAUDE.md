@@ -8,7 +8,7 @@ EnvMatch AI 是一个视频/图片环境相似度对比平台。用户上传 A/B
 
 ## Tech Stack
 
-- **Backend**: Java 17, Spring Boot 3.3.5, Spring MVC, Spring Data JPA, Hibernate, SQLite
+- **Backend**: Java 17, Spring Boot 3.3.5, Spring MVC, MyBatis-Plus 3.5.7, PostgreSQL
 - **Frontend**: React 19, TypeScript 6, Vite 8, Tailwind CSS 4, ECharts, React Router 7, Framer Motion, Radix UI, dnd-kit
 - **AI**: Google Gemini API, OpenAI-compatible multimodal APIs, MiniMax native VLM endpoint
 - **Media**: FFmpeg/FFprobe, Java ImageIO/Graphics2D
@@ -26,8 +26,8 @@ EnvMatch/
 │       │   ├── java/com/envmatch/
 │       │   │   ├── EnvMatchApplication.java
 │       │   │   ├── config/       # CORS, static storage mapping, bounded async executor
-│       │   │   ├── model/        # JPA entities and JSON converter
-│       │   │   ├── repository/   # Spring Data repositories and paged native queries
+│       │   │   ├── mapper/       # MyBatis-Plus mappers
+│       │   │   ├── model/        # Database models
 │       │   │   ├── service/      # storage, video, AI, task processing, seed/recovery
 │       │   │   └── web/          # REST controller and request DTOs
 │       │   └── resources/application.properties
@@ -53,7 +53,6 @@ EnvMatch/
 - `AiAnalysisService`: provider-specific payloads, HTTP model calls, JSON result parsing, Token calculation and sanitized audit logs.
 - `StorageService`: upload storage under the configured storage root.
 - `StartupRecoveryService`: marks interrupted `PENDING`/`PROCESSING` tasks as `FAILED` on startup.
-- `ModelCallLogSchemaService`: migrates legacy SQLite log primary keys when needed.
 
 ## API Endpoints
 
@@ -118,7 +117,7 @@ Defaults are in `backend/src/main/resources/application.properties`.
 | Property | Default | Purpose |
 |---|---:|---|
 | `server.port` | `8888` | HTTP port |
-| `spring.datasource.url` | `jdbc:sqlite:envmatch.db` | SQLite database |
+| `spring.datasource.url` | `jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:envmatch}` | PostgreSQL database |
 | `envmatch.storage-dir` | `storage` | Upload and generated-file root |
 | `envmatch.ai.max-inline-media-bytes` | `16777216` | Combined inline-video size limit |
 | `envmatch.task-executor.core-size` | `2` | Core async workers |
@@ -158,8 +157,8 @@ npm run build
 
 ## Implementation Notes
 
-- Keep SQLite compatibility; avoid database-specific JPA behavior unless migration support is included.
-- The task executor is intentionally bounded to protect JVM memory and reduce SQLite lock contention.
+- Keep database compatibility; avoid vendor-specific JPA behavior unless migration support is included.
+- The task executor is intentionally bounded to protect JVM memory and reduce database connection lock contention.
 - Task creation spans filesystem and database operations, so preserve compensating cleanup on partial failure.
 - Do not write raw video Base64 or very large Base64 fields to audit logs.
 - Native video automatically falls back to sampled frames when files exceed the inline-media limit.

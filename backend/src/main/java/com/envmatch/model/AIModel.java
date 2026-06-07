@@ -1,52 +1,38 @@
 package com.envmatch.model;
 
+import com.baomidou.mybatisplus.annotation.FieldFill;
+import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableField;
+import com.baomidou.mybatisplus.annotation.TableId;
+import com.baomidou.mybatisplus.annotation.TableName;
+import com.baomidou.mybatisplus.extension.handlers.JacksonTypeHandler;
 import com.fasterxml.jackson.databind.JsonNode;
-import jakarta.persistence.Column;
-import jakarta.persistence.Convert;
-import jakarta.persistence.Entity;
-import jakarta.persistence.Id;
-import jakarta.persistence.PrePersist;
-import jakarta.persistence.PreUpdate;
-import jakarta.persistence.Table;
 
 import java.time.LocalDateTime;
 import java.util.UUID;
 
-@Entity
-@Table(name = "ai_models")
+@TableName(value = "ai_models", autoResultMap = true)
 public class AIModel {
-    @Id
-    @Column(length = 36)
-    private String id;
+    @TableId(type = IdType.INPUT)
+    private String id = UUID.randomUUID().toString();
     private String name;
     private String identifier;
     private String provider;
-    @Column(columnDefinition = "TEXT")
     private String apiKey;
-    @Column(columnDefinition = "TEXT")
     private String baseUrl;
-    @Column(columnDefinition = "TEXT")
     private String description;
-    @Convert(converter = JsonNodeConverter.class)
-    @Column(columnDefinition = "TEXT")
+    
+    @TableField(typeHandler = JacksonTypeHandler.class)
     private JsonNode capabilities;
+    
     private String isDefault = "false";
     private Double sortOrder = 0.0;
+    
+    @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createdAt;
+    
+    @TableField(fill = FieldFill.INSERT_UPDATE)
     private LocalDateTime updatedAt;
-
-    @PrePersist
-    public void prePersist() {
-        if (id == null || id.isBlank()) id = UUID.randomUUID().toString();
-        LocalDateTime now = LocalDateTime.now();
-        if (createdAt == null) createdAt = now;
-        updatedAt = now;
-    }
-
-    @PreUpdate
-    public void preUpdate() {
-        updatedAt = LocalDateTime.now();
-    }
 
     public String getId() { return id; }
     public void setId(String id) { this.id = id; }

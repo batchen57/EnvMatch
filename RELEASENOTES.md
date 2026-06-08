@@ -1,5 +1,25 @@
 # EnvMatch 版本迭代日志 (Release Notes)
 
+## [v1.7.0] - 2026-06-08
+
+### 🖼️ JavaCV 架构迁移与原生媒体渲染重构 (OpenCV to JavaCV Migration)
+- **图像处理底层重构**：将后端底层的 OpenCV 原生动态链接库依赖及 Java 绑定（`org.openpnp:opencv`）彻底替换为 **JavaCV 平台依赖 (`org.bytedeco:javacv-platform`)**。
+- **跨平台适配与内存优化**：解决了在非 Windows 部署环境（如 Docker/Linux 容器）下 OpenCV 链接库加载失败的问题。通过 `Indexer` 指针访问 C++ 物理 Mat 像素矩阵，大幅提升了大规模视频抽帧与 Lucas-Kanade 稀疏光流计算的性能，消除了数据在 JNI 边界拷贝的内存开销与泄露隐患。
+
+### 🎞️ FFmpeg 原生处理链路与稳定性加固
+- **抛弃外部命令执行**：全面废弃通过 `ProcessBuilder` 管道调用外部 `ffmpeg` 命令行程序的陈旧设计。
+- **JavaCV 原生 API 接管**：视频读取、区间剪辑、帧捕获等底层操作全面改由 JavaCV **`FFmpegFrameGrabber` 与 `FFmpegFrameRecorder`** 原生 API 执行。
+- **进程与 CPU 稳定保障**：彻底消除了在高并发或任务异常中止时，外部 ffmpeg 孤儿进程残留导致服务器 CPU/内存暴涨的稳定性隐患，系统具备完全的多平台容器化开箱即用能力。
+
+### 📝 前端模型日志换行与排版优化
+- **日志明细换行呈现**：优化了前端模型调用历史明细组件 `ModelLogs.tsx`。
+- **原生多行文本保留**：在弹窗详情展示 JSON 报文字段时，不再物理替换换行符 `\n` 为 `↵`，而是引入 `whitespace-pre-wrap` 样式保持原始多行格式（如 Prompt 或模型返回的 markdown 及思维链内容），极大地改善了审计回溯的视觉易读性。
+
+### 🛡️ Git 忽略配置扩展
+- **临时媒体防污染**：在 `.gitignore` 中新增 `*.mp4` 排除规则，隔离本地运行及测试产生的临时视频文件，防止脏文件污染代码版本库。
+
+---
+
 ## [v1.6.0] - 2026-06-07
 
 ### 📊 MyBatis-Plus 重构与 PostgreSQL 企业级数据库迁移

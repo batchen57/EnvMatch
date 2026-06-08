@@ -54,18 +54,52 @@ import static org.springframework.http.HttpStatus.INTERNAL_SERVER_ERROR;
 import static org.springframework.http.HttpStatus.NOT_FOUND;
 import static org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE;
 
+/**
+ * 系统核心 API REST 控制器。
+ * 
+ * <p>该类暴露了系统所有的 HTTP REST 接口，包含了以下主要功能路由：
+ * <ul>
+ *   <li><b>任务管理</b>：创建异步比对任务（支持 Multipart 视频上传和预处理参数验证）、查询单个任务详情/进度、删除任务（同步清理物理磁盘文件）以及分页检索任务。</li>
+ *   <li><b>仪表盘统计（Dashboard）</b>：汇总计算全部任务的总数、成功/失败分布、多维度相似度评分均值、历史 Token 吞吐曲线等指标。</li>
+ *   <li><b>模型与提示词配置 CRUD</b>：动态管理 AI 模型端点和反欺诈 Prompts。</li>
+ *   <li><b>调用日志审计查询</b>：支持关键词对模型调用审计记录进行检索和明细展示。</li>
+ *   <li><b>文件清理调度</b>：提供接口清理指定天数前的遗留物理临时素材。</li>
+ * </ul>
+ * </p>
+ */
 @RestController
 public class ApiController {
+    
+    /** 任务 Mapper */
     private final TaskMapper taskMapper;
+    
+    /** 任务结果 Mapper */
     private final TaskResultMapper resultMapper;
+    
+    /** 模型配置 Mapper */
     private final AIModelMapper modelMapper;
+    
+    /** 提示词模板 Mapper */
     private final PromptTemplateMapper promptMapper;
+    
+    /** 模型调用审计日志 Mapper */
     private final ModelCallLogMapper logMapper;
+    
+    /** 存储管理服务 */
     private final StorageService storageService;
+    
+    /** 异步任务处理服务 */
     private final TaskProcessingService taskProcessingService;
+    
+    /** 种子数据初始化服务 */
     private final SeedService seedService;
+    
+    /** Jackson 对象转换映射器 */
     private final ObjectMapper mapper;
 
+    /**
+     * 构造函数，自动注入 Spring 容器管理的依赖组件。
+     */
     public ApiController(TaskMapper taskMapper,
                          TaskResultMapper resultMapper,
                          AIModelMapper modelMapper,
@@ -86,6 +120,18 @@ public class ApiController {
         this.mapper = mapper;
     }
 
+    /**
+     * 创建异步环境比对分析任务。
+     * 接收上传的 A/B 两个媒体素材文件，并启动异步处理线程池进行抽帧和推理。
+     *
+     * @param taskName          任务名称
+     * @param videoA            视频/图片素材 A
+     * @param videoB            视频/图片素材 B
+     * @param prompt            对比提示词（可选，若为空自动回落到系统预置的默认/反欺诈提示词）
+     * @param modelId           使用的 AI 模型 ID 标识
+     * @param preprocessOptions 预处理选项参数（JSON 字符串格式，包括识别模式、采样率、裁剪区间等）
+     * @return 包含 taskId 的状态 Response Map
+     */
     @PostMapping(value = "/tasks/", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public Map<String, String> createTask(@RequestParam("task_name") String taskName,
                                           @RequestPart("video_a") MultipartFile videoA,
@@ -93,6 +139,7 @@ public class ApiController {
                                           @RequestParam(value = "prompt", required = false) String prompt,
                                           @RequestParam(value = "model_id", defaultValue = "gemini-2.5-pro") String modelId,
                                           @RequestParam(value = "preprocess_options", required = false) String preprocessOptions) {
+        // 1. 输入数据校验
         validateText("task_name", taskName, 1, 200);
         validateText("model_id", modelId, 1, 200);
         if (videoA.isEmpty() || videoB.isEmpty()) {
@@ -108,6 +155,7 @@ public class ApiController {
         task.setStatus(TaskStatus.PENDING);
         task.setModelId(modelId);
 
+        // 2. 如果提示词为空，拉取最新的系统预置种子提示词填充
         String taskPrompt = prompt;
         if (taskPrompt == null || taskPrompt.isBlank()) {
             seedService.ensurePrompts();
@@ -125,15 +173,18 @@ public class ApiController {
         task.setPreprocessOptions(parsePreprocessOptions(preprocessOptions));
 
         try {
-            // 先保存两个上传文件再创建任务记录；持久化或任务入队失败时，补偿清理所有已完成步骤。
+            // 先保存两个上传文件再创建任务记录；若持久化或任务入队失败，触发补偿清理已保存的物理磁盘文件。
             aPath = storageService.saveUpload(videoA, taskId, "A");
             bPath = storageService.saveUpload(videoB, taskId, "B");
             task.setVideoAPath(aPath.toString());
             task.setVideoBPath(bPath.toString());
             saveOrUpdateTask(task);
+            
+            // 3. 提交至异步线程池开始处理
             taskProcessingService.processAsync(taskId);
             return Map.of("task_id", taskId, "message", "Task created successfully");
         } catch (TaskRejectedException e) {
+            // 补偿逻辑：线程池队列满被拒绝时，同步删除物理上传文件并清理数据库占位记录
             cleanupFailedCreation(taskId, aPath, bPath);
             throw new ResponseStatusException(SERVICE_UNAVAILABLE, "Task queue is full, please try again later", e);
         } catch (IOException | RuntimeException e) {
@@ -143,6 +194,12 @@ public class ApiController {
         }
     }
 
+    /**
+     * 根据任务 ID 获取任务及比对分析结果明细。
+     *
+     * @param taskId 任务 ID
+     * @return 任务及其结果构成的实体 Map
+     */
     @GetMapping("/tasks/{taskId}")
     public Map<String, Object> getTask(@PathVariable String taskId) {
         Task task = taskMapper.selectById(taskId);
@@ -156,23 +213,40 @@ public class ApiController {
         return response;
     }
 
+    /**
+     * 删除指定任务。
+     * 会同步删除磁盘上保存的原始视频、切片视频以及抽帧预览图片，最后删除任务及分析结果的数据库记录。
+     *
+     * @param taskId 任务 ID
+     * @return 操作状态
+     */
     @DeleteMapping("/tasks/{taskId}")
     public Map<String, String> deleteTask(@PathVariable String taskId) {
         Task task = taskMapper.selectById(taskId);
         if (task == null) {
             throw new ResponseStatusException(NOT_FOUND, "Task not found");
         }
+        // 同步删除对应的物理媒体文件，释放存储空间
         deletePath(task.getVideoAPath());
         deletePath(task.getVideoBPath());
         deletePath(storageService.storageDir().resolve(taskId + "_A_frames").toString());
         deletePath(storageService.storageDir().resolve(taskId + "_B_frames").toString());
         deletePath(storageService.storageDir().resolve(taskId + "_A_processed.mp4").toString());
         deletePath(storageService.storageDir().resolve(taskId + "_B_processed.mp4").toString());
+        
         resultMapper.deleteById(taskId);
         taskMapper.deleteById(taskId);
         return Map.of("status", "success", "message", "Task " + taskId + " deleted");
     }
 
+    /**
+     * 分页列出系统中的分析任务，支持根据状态过滤，同时返回各类状态任务的总数。
+     *
+     * @param status 过滤状态（如 ALL, PROCESSING, COMPLETED, FAILED）
+     * @param skip   跳过的记录数
+     * @param limit  获取的最大行数
+     * @return 包含任务列表和统计计数的 Map
+     */
     @GetMapping("/tasks/")
     public Map<String, Object> listTasks(@RequestParam(value = "status", required = false) String status,
                                          @RequestParam(defaultValue = "0") int skip,
@@ -193,6 +267,7 @@ public class ApiController {
             tasks = taskMapper.findPageByStatus(status, safeSkip, safeLimit);
         }
 
+        // 组装统计计数
         Map<String, Long> counts = new LinkedHashMap<>();
         counts.put("ALL", (long) taskMapper.selectCount(null));
         counts.put("PROCESSING", (long) taskMapper.selectCount(new LambdaQueryWrapper<Task>()
@@ -204,6 +279,12 @@ public class ApiController {
         return Map.of("tasks", tasks, "total_counts", counts);
     }
 
+    /**
+     * 汇总生成仪表盘统计数据。
+     * 统计指标包括：任务总量、成功率、平均相似度、总 Token 消耗、总素材体积和时长、五维度雷达图数据、模型分布饼图、以及最近 7 日趋势。
+     *
+     * @return 指标数据 Map
+     */
     @GetMapping("/dashboard-stats")
     public Map<String, Object> dashboardStats() {
         List<Task> tasks = taskMapper.selectList(null);
@@ -213,7 +294,7 @@ public class ApiController {
         double totalDuration = tasks.stream().mapToDouble(t -> nz(t.getVideoADuration()) + nz(t.getVideoBDuration())).sum();
         double totalSize = tasks.stream().mapToDouble(t -> nz(t.getVideoASize()) + nz(t.getVideoBSize())).sum();
 
-        // 分数为空表示“尚未评估”，而不是相似度为 0；分布统计应排除待处理和未完整执行的任务。
+        // 相似度阈值分布
         Map<String, Integer> distribution = Map.of(
                 "high", (int) tasks.stream().filter(t -> t.getSimilarityScore() != null && t.getSimilarityScore() >= 70).count(),
                 "medium", (int) tasks.stream().filter(t -> t.getSimilarityScore() != null && t.getSimilarityScore() >= 40 && t.getSimilarityScore() < 70).count(),
@@ -235,6 +316,13 @@ public class ApiController {
         return response;
     }
 
+    /**
+     * 临时磁盘文件清理接口。
+     * 清理物理存储根目录下，修改时间长于指定天数的所有临时及生成素材。
+     *
+     * @param days 阀值天数，默认为 7 天
+     * @return 清理掉的文件数量
+     */
     @PostMapping("/cleanup")
     public Map<String, Object> cleanup(@RequestParam(defaultValue = "7") int days) {
         long cutoff = System.currentTimeMillis() - days * 86_400_000L;
@@ -257,6 +345,9 @@ public class ApiController {
         return Map.of("status", "ok", "deleted", deleted);
     }
 
+    /**
+     * 列出所有的提示词模板列表（若为空自动初始化预置模板）。
+     */
     @GetMapping("/prompt-templates/")
     public List<PromptTemplate> listPromptTemplates() {
         seedService.ensurePrompts();
@@ -264,6 +355,9 @@ public class ApiController {
                 .orderByDesc(PromptTemplate::getCreatedAt));
     }
 
+    /**
+     * 创建一个新的提示词模板。
+     */
     @PostMapping("/prompt-templates/")
     public PromptTemplate createPromptTemplate(@RequestBody PromptTemplateRequest body) {
         validatePromptRequest(body);
@@ -274,6 +368,9 @@ public class ApiController {
         return template;
     }
 
+    /**
+     * 更新指定的提示词模板。
+     */
     @PutMapping("/prompt-templates/{templateId}")
     public PromptTemplate updatePromptTemplate(@PathVariable String templateId,
                                                @RequestBody PromptTemplateRequest body) {
@@ -288,6 +385,9 @@ public class ApiController {
         return template;
     }
 
+    /**
+     * 删除指定的提示词模板。
+     */
     @DeleteMapping("/prompt-templates/{templateId}")
     public Map<String, String> deletePromptTemplate(@PathVariable String templateId) {
         if (promptMapper.selectById(templateId) == null) {
@@ -297,6 +397,9 @@ public class ApiController {
         return Map.of("status", "ok");
     }
 
+    /**
+     * 列出所有注册在系统的 AI 模型配置列表（若表为空自动注入种子数据）。
+     */
     @GetMapping("/models/")
     public List<AIModel> listModels() {
         seedService.ensureModels();
@@ -305,6 +408,9 @@ public class ApiController {
                 .orderByDesc(AIModel::getCreatedAt));
     }
 
+    /**
+     * 添加一个新的 AI 模型配置。
+     */
     @PostMapping("/models/")
     public AIModel createModel(@RequestBody AIModelRequest body) {
         validateModelRequest(body);
@@ -316,6 +422,9 @@ public class ApiController {
         return model;
     }
 
+    /**
+     * 修改一个现有的 AI 模型配置。
+     */
     @PutMapping("/models/{modelId}")
     public AIModel updateModel(@PathVariable String modelId, @RequestBody AIModelRequest body) {
         validateModelRequest(body);
@@ -330,6 +439,9 @@ public class ApiController {
         return model;
     }
 
+    /**
+     * 删除指定的 AI 模型配置。
+     */
     @DeleteMapping("/models/{modelId}")
     public Map<String, String> deleteModel(@PathVariable String modelId) {
         if (modelMapper.selectById(modelId) == null) {
@@ -339,6 +451,14 @@ public class ApiController {
         return Map.of("status", "ok");
     }
 
+    /**
+     * 分页多维度模糊搜索模型接口调用审计日志。
+     *
+     * @param search 搜索关键词（支持匹配任务名、任务ID、模型ID）
+     * @param skip   跳过数
+     * @param limit  返回行数限制
+     * @return 日志列表及匹配总量 Map
+     */
     @GetMapping("/model-logs/")
     public Map<String, Object> listModelLogs(@RequestParam(value = "search", required = false) String search,
                                              @RequestParam(defaultValue = "0") int skip,
@@ -358,6 +478,9 @@ public class ApiController {
         return Map.of("logs", logs, "total", total);
     }
 
+    /**
+     * 根据 ID 获取单个模型调用审计日志详情（包括完整的请求入参与返回响应 Json，排除了 Base64 大视频数据）。
+     */
     @GetMapping("/model-logs/{id}")
     public ModelCallLog getModelLog(@PathVariable Long id) {
         ModelCallLog log = logMapper.selectById(id);
@@ -367,6 +490,9 @@ public class ApiController {
         return log;
     }
 
+    /**
+     * 校验和解析预处理选项参数。
+     */
     private JsonNode parsePreprocessOptions(String raw) {
         if (raw == null || raw.isBlank()) return NullNode.getInstance();
         try {
@@ -376,7 +502,7 @@ public class ApiController {
             validateChoice(node, "sampling_type", List.of("fixed", "perceptual"));
             validateRange(node, "sampling_fps", 1, 5);
             validateRange(node, "resolution_val", 90, 2160);
-            // Defaults preserve the bounded 0-15 second analysis contract for older clients.
+            // 默认为旧客户端保留 0 - 15 秒裁剪限制
             validateDoubleRange(node, "clip_start_seconds", 0.0, 86400.0);
             validateDoubleRange(node, "clip_end_seconds", 0.001, 86400.0);
             double clipStart = node.path("clip_start_seconds").asDouble(0.0);
@@ -426,7 +552,6 @@ public class ApiController {
     }
 
     private void validatePromptRequest(PromptTemplateRequest body) {
-        // 在 HTTP 边界校验 DTO，防止客户端直接写入不完整的 JPA 实体或仅供持久化使用的字段。
         if (body == null) throw new ResponseStatusException(BAD_REQUEST, "Request body is required");
         validateText("name", body.name(), 1, 200);
         validateText("content", body.content(), 1, 100_000);
@@ -469,7 +594,7 @@ public class ApiController {
     }
 
     private void cleanupFailedCreation(String taskId, Path aPath, Path bPath) {
-        // 文件存储与数据库无法共享同一事务，因此使用幂等补偿清理创建过程中的部分成功状态。
+        // 由于本地多媒体写入与数据库持久化不能共享事务，此方法提供幂等性清理以防数据和文件冗余遗留
         deletePath(aPath == null ? null : aPath.toString());
         deletePath(bPath == null ? null : bPath.toString());
         resultMapper.deleteById(taskId);

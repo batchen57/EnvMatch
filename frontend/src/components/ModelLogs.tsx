@@ -746,11 +746,9 @@ function JsonView({ data, isLast = true }: { data: any, isLast?: boolean }) {
   if (typeof data === "boolean") return <span className="text-purple-400">{data.toString()}{!isLast && ","}</span>;
   if (typeof data === "number") return <span className="text-amber-400">{data}{!isLast && ","}</span>;
   if (typeof data === "string") {
-    // 检查是否是多行，如果是多行则特殊处理一下换行
-    const isMultiline = data.includes('\n');
     return (
-      <span className="text-emerald-400 break-words">
-        "{isMultiline ? data.replace(/\n/g, '↵') : data}"{!isLast && ","}
+      <span className="text-emerald-400 break-words whitespace-pre-wrap">
+        "{data}"{!isLast && ","}
       </span>
     );
   }

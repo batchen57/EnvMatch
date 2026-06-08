@@ -36,15 +36,42 @@ import java.util.Locale;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+/**
+ * AI 多模态大模型分析核心服务类。
+ * 
+ * <p>该类主要负责将提取出来的关键帧或裁剪后的短视频包装成符合各大模型协议的 Payload，
+ * 并通过 HTTP 客户端发送至对应的 API 端点。它包含了以下核心模块：
+ * <ul>
+ *   <li><b>多模型协议适配</b>：支持 Google Gemini 专属格式、OpenAI 兼容的多模态 chat/completions 格式、MiniMax 特有的原生 VLM（视频/图片）格式、以及通义千问（Qwen-VL）专有格式。</li>
+ *   <li><b>图像网格合成（Image Grid）</b>：如果是图片模式，将多张关键帧拼接成一张大图（8 帧合图，以 640x360 黑色填充保持原宽高比），从而节省大模型的输入图片张数并大幅节省输入 Token 成本。</li>
+ *   <li><b>Qwen 视频 Token 精确估算</b>：实现了阿里云官方通义千问 Qwen2-VL 视频 Token 的计算算法公式。</li>
+ *   <li><b>审计日志脱敏（Sanitization）</b>：对发送给模型的 Payload 和响应进行深拷贝脱敏，防止将用户视频 Base64 大字段和 API Key 写入 PostgreSQL 数据库审计日志中，避免造成数据库膨胀和隐私泄露。</li>
+ * </ul>
+ * </p>
+ */
 @Service
 public class AiAnalysisService {
     private static final Logger LOGGER = LoggerFactory.getLogger(AiAnalysisService.class);
+    
+    /** 合图支持的最大抽帧数量 */
     private static final int COMPARISON_MAX_FRAMES = 8;
+    
+    /** 图像网格合图的列数 */
     private static final int COMPARISON_GRID_COLUMNS = 2;
+    
+    /** 拼接图中单帧的缩放宽度 */
     private static final int COMPARISON_FRAME_WIDTH = 640;
+    
+    /** 拼接图中单帧的缩放高度 */
     private static final int COMPARISON_FRAME_HEIGHT = 360;
+    
+    /** 拼接图中单帧标签文字区域的高度 */
     private static final int COMPARISON_LABEL_HEIGHT = 32;
+    
+    /** 拼接图最终 JPEG 压缩画质 */
     private static final float COMPARISON_JPEG_QUALITY = 0.92f;
+    
+    // Qwen2-VL 视频 Token 算力公式常量（与官方算法严格对齐）
     private static final int QWEN_FRAME_FACTOR = 2;
     private static final int QWEN_IMAGE_FACTOR = 32;
     private static final int QWEN_VIDEO_MIN_PIXELS = 4 * 32 * 32;
@@ -54,26 +81,39 @@ public class AiAnalysisService {
     private static final int QWEN_FPS_MAX_FRAMES = 2000;
     private static final double QWEN_VIDEO_TOTAL_PIXELS = 131072.0 * 32 * 32;
 
+    /** 默认的对比系统提示词 */
     private static final String DEFAULT_PROMPT = """
             你是一名反欺诈调查中的环境鉴定专家。你的核心任务是判断两段视频/关键帧是否拍摄于同一个物理空间（如同一间房屋、门店、办公室），
             以识别中介团伙反复使用同一场地进行虚假申请的行为。
-
+ 
             【分析原则】
             1. 完全忽略画面中的人物、手持物品、手机/电脑屏幕内容、临时摆放的文件等前景干扰。
             2. 聚焦不可移动或难以短期更改的固定环境特征。
             3. 重点关注：墙面颜色/纹理/壁纸、地板/地砖材质与纹理、门窗框架与把手样式、天花板与灯具、
                开关面板/插座位置、固定家具（橱柜/嵌入式衣柜）、空间布局与房间结构。
             4. 如果两个环境高度相似（得分≥80），请在 similar_points 中列出具体匹配的固定特征作为证据。
-
+ 
             仅返回严格 JSON，不要包含 Markdown 代码块标记或任何解释性文字。
             """;
 
+    /** JSON 对象解析与映射器 */
     private final ObjectMapper mapper;
+    
+    /** 模型审计日志数据库 Mapper */
     private final ModelCallLogMapper logMapper;
+    
+    /** 执行模型 API HTTP 请求的客户端 */
     private final HttpClient httpClient;
+    
+    /** 标准化存储根目录路径 */
     private final Path storageDir;
+    
+    /** 允许内联 Base64 视频流的最大字节限制 */
     private final long maxInlineMediaBytes;
 
+    /**
+     * 构造函数，初始化存储目录及内联大小参数限制。
+     */
     public AiAnalysisService(ObjectMapper mapper,
                              ModelCallLogMapper logMapper,
                              @Value("${envmatch.storage-dir:storage}") String storageDir,
@@ -85,6 +125,23 @@ public class AiAnalysisService {
         this.maxInlineMediaBytes = Math.max(0, maxInlineMediaBytes);
     }
 
+    /**
+     * 发起大模型接口调用，并分析返回两组素材的相似度结果。
+     *
+     * @param framesA          素材 A 的抽帧路径列表
+     * @param framesB          素材 B 的抽帧路径列表
+     * @param prompt           用户自定义提示词
+     * @param apiKey           API 访问 Key
+     * @param baseUrl          API 基础端点 URL
+     * @param modelId          模型技术标识名称
+     * @param provider         模型厂商标识名称
+     * @param recognitionMode  识别模式：image（帧拼接合图）或 video（内联原视频）
+     * @param videoAPath       素材 A 视频存储路径
+     * @param videoBPath       素材 B 视频存储路径
+     * @param taskId           关联任务 ID
+     * @param taskName         关联任务名称
+     * @return 封装的 {@link AiAnalysisResponse} 响应对象
+     */
     public AiAnalysisResponse analyze(List<String> framesA,
                                       List<String> framesB,
                                       String prompt,
@@ -99,6 +156,8 @@ public class AiAnalysisService {
                                       String taskName) {
         String effectivePrompt = buildPrompt(prompt);
         boolean gemini = isGemini(provider, modelId);
+        
+        // 验证必要的连接密钥与地址参数
         if ((!gemini && (baseUrl == null || baseUrl.isBlank())) || apiKey == null || apiKey.isBlank()) {
             String message = "Model API key or endpoint URL is not configured";
             return new AiAnalysisResponse(errorResult(message), usageEstimate(effectivePrompt, framesA.size() + framesB.size(), 0), message);
@@ -106,10 +165,14 @@ public class AiAnalysisService {
 
         LocalDateTime startedAt = LocalDateTime.now();
         String requestUrl = baseUrl == null ? "" : baseUrl;
+        
+        // 针对 MiniMax Native VLM 端点的兼容映射
         if ("MiniMax-M2.7".equalsIgnoreCase(modelId) && "https://api.minimaxi.com/v1".equals(requestUrl.replaceAll("/+$", ""))) {
             requestUrl = "https://api.minimaxi.com/v1/coding_plan/vlm";
         }
         boolean nativeVlm = requestUrl.contains("/coding_plan/vlm");
+        
+        // 构建最终的请求网络地址
         if (gemini) {
             requestUrl = geminiGenerateContentUrl(requestUrl, modelId, apiKey);
         } else if (!nativeVlm && !requestUrl.endsWith("/chat/completions")) {
@@ -118,11 +181,14 @@ public class AiAnalysisService {
 
         PayloadEnvelope envelope;
         try {
+            // 构造请求的 JSON Body 载荷，判断是否允许使用 inlineVideo
             envelope = buildPayload(framesA, framesB, effectivePrompt, modelId, provider, recognitionMode, nativeVlm, gemini, videoAPath, videoBPath);
         } catch (Exception e) {
             return new AiAnalysisResponse(errorResult(e.getMessage()), usageEstimate(effectivePrompt, 0, 0), e.getMessage());
         }
+        
         ObjectNode payload = envelope.payload();
+        // 记录模型调用起始审计日志（已进行深拷贝脱敏，去除敏感密钥和二进制大字段）
         ModelCallLog callLog = startLog(taskId, taskName, modelId, requestUrl, payload, startedAt);
 
         int status = 0;
@@ -136,6 +202,7 @@ public class AiAnalysisService {
                     .POST(HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(payload)));
             if (!gemini) requestBuilder.header("Authorization", "Bearer " + apiKey);
 
+            // 发送 HTTP POST 请求
             HttpResponse<String> response = httpClient.send(requestBuilder.build(), HttpResponse.BodyHandlers.ofString());
             status = response.statusCode();
             responseBody = parseOrText(response.body());
@@ -146,14 +213,21 @@ public class AiAnalysisService {
                 return new AiAnalysisResponse(errorResult(message), usageEstimate(effectivePrompt, framesA.size() + framesB.size(), 0), message);
             }
 
+            // 提取模型响应的文本答案
             answer = extractAnswer(responseBody, nativeVlm, gemini);
             if (answer == null || answer.isBlank()) {
                 throw new IllegalStateException("API returned empty content. Raw response: " + truncate(response.body(), 500));
             }
+            
+            // 解析大模型返回的文本为结构化的 JSON 对比结果对象
             JsonNode result = parseJsonResult(answer);
             String effectiveRecognitionMode = envelope.inlineVideo() ? "video" : "image";
+            
+            // 提取/估算本次模型调用的 Token 消耗用量
             JsonNode usage = extractUsage(responseBody, effectivePrompt, answer, framesA.size() + framesB.size(), modelId,
                     effectiveRecognitionMode, videoAPath, videoBPath);
+            
+            // 写入结束审计日志
             finishLog(callLog, responseBody, LocalDateTime.now(), status,
                     usage.path("prompt_tokens").asDouble(0), usage.path("completion_tokens").asDouble(0));
             return new AiAnalysisResponse(result, usage, null);
@@ -167,10 +241,13 @@ public class AiAnalysisService {
         }
     }
 
+    /**
+     * 将用户 Prompt 与要求的输出 JSON 数据格式进行拼接，生成最终的指导提示词。
+     */
     private String buildPrompt(String prompt) {
         String base = (prompt == null || prompt.isBlank()) ? DEFAULT_PROMPT : prompt;
         return base + """
-
+ 
                 严格对比素材 A 和素材 B 的拍摄环境，判断是否为同一物理空间。返回如下 JSON 结构：
                 {
                   "similarity_score": 85,
@@ -207,6 +284,7 @@ public class AiAnalysisService {
         }
 
         ObjectNode payload = mapper.createObjectNode();
+        // MiniMax 专属的原生 VLM 协议适配（只支持一个大图参数）
         if (nativeVlm) {
             payload.put("prompt", imageComparisonPrompt(prompt));
             payload.put("image_url", "data:image/jpeg;base64," + nativeComparisonGridBase64(framesA, framesB));
@@ -220,6 +298,7 @@ public class AiAnalysisService {
         ObjectNode user = messages.addObject();
         user.put("role", "user");
 
+        // 阿里大模型兼容格式
         boolean isMiniMax = "MiniMax".equalsIgnoreCase(provider) || (modelId != null && modelId.toLowerCase(Locale.ROOT).contains("minimax"));
         if (isMiniMax) {
             user.put("content", imageComparisonPrompt(prompt));
@@ -231,14 +310,17 @@ public class AiAnalysisService {
         ArrayNode content = user.putArray("content");
         boolean qwenVideo = "video".equalsIgnoreCase(recognitionMode) && modelId.toLowerCase(Locale.ROOT).contains("qwen");
         if (qwenVideo && inlineVideo) {
+            // Qwen 视频模式：内联素材原视频
             addVideo(content, videoAPath);
             addVideo(content, videoBPath);
             content.addObject().put("type", "text").put("text", prompt);
         } else if ("video".equalsIgnoreCase(recognitionMode)) {
+            // 超出大小限制降级为多张采样帧形式发送
             content.addObject().put("type", "text").put("text", prompt);
             for (String frame : framesA.stream().limit(5).toList()) addImage(content, frame);
             for (String frame : framesB.stream().limit(5).toList()) addImage(content, frame);
         } else {
+            // 默认的图像模式：将素材 A/B 分别转换为一张拼接拼接网格图（双大图模式）
             content.addObject().put("type", "text").put("text", imageComparisonPrompt(prompt));
             addBase64Image(content, frameGridBase64(framesA, "A"));
             addBase64Image(content, frameGridBase64(framesB, "B"));
@@ -246,6 +328,9 @@ public class AiAnalysisService {
         return new PayloadEnvelope(payload, qwenVideo && inlineVideo);
     }
 
+    /**
+     * 构建 Google Gemini 专门的 Contents / Parts 多模态调用协议。
+     */
     private ObjectNode buildGeminiPayload(List<String> framesA, List<String> framesB, String prompt,
                                           boolean requestedVideo, boolean inlineVideo,
                                           String videoAPath, String videoBPath) throws Exception {
@@ -268,18 +353,27 @@ public class AiAnalysisService {
         return payload;
     }
 
+    /**
+     * 添加图片到请求 Payload (OpenAI 格式)
+     */
     private void addImage(ArrayNode content, String path) throws Exception {
         ObjectNode image = content.addObject();
         image.put("type", "image_url");
         image.putObject("image_url").put("url", "data:image/jpeg;base64," + fileBase64(path));
     }
 
+    /**
+     * 添加 Base64 图片到请求 Payload (OpenAI 格式)
+     */
     private void addBase64Image(ArrayNode content, String base64) {
         ObjectNode image = content.addObject();
         image.put("type", "image_url");
         image.putObject("image_url").put("url", "data:image/jpeg;base64," + base64);
     }
 
+    /**
+     * 添加内联视频到请求 Payload (OpenAI 格式，例如通义千问)
+     */
     private void addVideo(ArrayNode content, String path) throws Exception {
         Path resolved = resolvePath(path);
         if (path == null || path.isBlank() || !Files.exists(resolved)) throw new IllegalStateException("Qwen video mode requires readable video files");
@@ -289,6 +383,9 @@ public class AiAnalysisService {
         video.put("fps", 2);
     }
 
+    /**
+     * 添加内联多媒体到 Gemini Payload
+     */
     private void addGeminiInlineData(ArrayNode parts, String path, String mimeType) throws Exception {
         Path resolved = resolvePath(path);
         if (path == null || path.isBlank() || !Files.exists(resolved)) throw new IllegalStateException("Gemini video mode requires readable video files");
@@ -297,12 +394,18 @@ public class AiAnalysisService {
         inlineData.put("data", fileBase64(path));
     }
 
+    /**
+     * 添加 Base64 图像到 Gemini Payload
+     */
     private void addGeminiBase64Image(ArrayNode parts, String base64) {
         ObjectNode inlineData = parts.addObject().putObject("inlineData");
         inlineData.put("mimeType", "image/jpeg");
         inlineData.put("data", base64);
     }
 
+    /**
+     * 拼接网格合图的辅助 Prompt 头。
+     */
     private String imageComparisonPrompt(String prompt) {
         return """
                 第一张合图包含素材 A 的关键帧，第二张合图包含素材 B 的关键帧。
@@ -310,7 +413,7 @@ public class AiAnalysisService {
                 请逐一对比对应时间位置的帧（A1 对 B1、A2 对 B2，依此类推），
                 聚焦背景环境中的固定特征（墙面、地面、门窗、灯具、家具布局），
                 忽略人物和可移动物品，判断两组帧是否拍摄于同一物理空间。
-
+ 
                 """ + prompt;
     }
 
@@ -337,12 +440,17 @@ public class AiAnalysisService {
         for (int i = 0; i < images.size(); i++) {
             int x = (i % columns) * COMPARISON_FRAME_WIDTH;
             int y = (i / columns) * rowHeight;
+            // 绘制网格中的每一帧，包括其序号标签（如 A1, A2...）
             drawComparisonCell(g, images.get(i), x, y, groupLabel + (i + 1));
         }
         g.dispose();
         return encodeJpeg(grid);
     }
 
+    /**
+     * 用于 MiniMax 等原生只支持单张输入图像的模型。
+     * 将 A 素材网格合图和 B 素材网格合图纵向拼接成一张包含所有抽帧画面的巨大拼图。
+     */
     private String nativeComparisonGridBase64(List<String> framesA, List<String> framesB) throws Exception {
         BufferedImage gridA = decodeBase64Image(frameGridBase64(framesA, "A"));
         BufferedImage gridB = decodeBase64Image(frameGridBase64(framesB, "B"));
@@ -357,12 +465,18 @@ public class AiAnalysisService {
         return encodeJpeg(combined);
     }
 
+    /**
+     * 将 Base64 字符串解码还原为 Java BufferedImage 对象。
+     */
     private BufferedImage decodeBase64Image(String base64) throws Exception {
         BufferedImage image = ImageIO.read(new java.io.ByteArrayInputStream(Base64.getDecoder().decode(base64)));
         if (image == null) throw new IllegalStateException("Unable to decode generated frame grid");
         return image;
     }
 
+    /**
+     * 均匀取样抽稀算法，将视频的所有抽帧路径列表缩减至限制值。
+     */
     private List<String> evenlySample(List<String> frames, int limit) {
         if (frames == null || frames.isEmpty() || limit <= 0) return List.of();
         if (frames.size() <= limit) return List.copyOf(frames);
@@ -371,33 +485,49 @@ public class AiAnalysisService {
                 .toList();
     }
 
+    /**
+     * 在拼接图的指定 X/Y 偏移位置绘制单个关键帧单元。
+     * 包含序号文字顶栏（黑色背景、白色粗体）和图片展示区域（不足 640x360 时以黑色留边填充）。
+     */
     private void drawComparisonCell(Graphics2D g, BufferedImage source, int x, int y, String label) {
+        // 1. 绘制顶栏标签框及文字
         g.setColor(new Color(32, 32, 32));
         g.fillRect(x, y, COMPARISON_FRAME_WIDTH, COMPARISON_LABEL_HEIGHT);
         g.setColor(Color.WHITE);
         g.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 20));
         g.drawString(label, x + 12, y + 23);
-
+ 
+        // 2. 绘制图片放置区
         int imageY = y + COMPARISON_LABEL_HEIGHT;
         g.setColor(Color.BLACK);
         g.fillRect(x, imageY, COMPARISON_FRAME_WIDTH, COMPARISON_FRAME_HEIGHT);
+        
+        // 计算等比例缩放大小，防止环境结构变形
         double scale = Math.min(
                 COMPARISON_FRAME_WIDTH / (double) source.getWidth(),
                 COMPARISON_FRAME_HEIGHT / (double) source.getHeight()
         );
         int width = Math.max(1, (int) Math.round(source.getWidth() * scale));
         int height = Math.max(1, (int) Math.round(source.getHeight() * scale));
+        
+        // 居中对齐坐标
         int imageX = x + (COMPARISON_FRAME_WIDTH - width) / 2;
         int centeredY = imageY + (COMPARISON_FRAME_HEIGHT - height) / 2;
         g.drawImage(source, imageX, centeredY, width, height, null);
     }
 
+    /**
+     * 启用 Graphics2D 双立方差值及抗锯齿渲染，避免缩放图严重失真。
+     */
     private void applyHighQualityRendering(Graphics2D g) {
         g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC);
         g.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
         g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
     }
 
+    /**
+     * 将内存图片编码压缩为 JPEG 字节流并转化为 Base64 字符串。
+     */
     private String encodeJpeg(BufferedImage image) throws Exception {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         ImageWriter writer = ImageIO.getImageWritersByFormatName("jpg").next();
@@ -413,6 +543,9 @@ public class AiAnalysisService {
         return Base64.getEncoder().encodeToString(out.toByteArray());
     }
 
+    /**
+     * 读取指定相对/绝对物理路径图片文件为 BufferedImage。
+     */
     private BufferedImage readImage(String path) {
         try {
             return ImageIO.read(resolvePath(path).toFile());
@@ -421,10 +554,17 @@ public class AiAnalysisService {
         }
     }
 
+    /**
+     * 读取文件字节码并转换为 Base64。
+     */
     private String fileBase64(String path) throws Exception {
         return Base64.getEncoder().encodeToString(Files.readAllBytes(resolvePath(path)));
     }
 
+    /**
+     * 判断待上传的视频/多媒体文件大小是否适合作为 Base64 内联参数传输。
+     * 如果两份视频总大小超过配置上限（如 16MB），则自动判定为 false，以防触发 JVM 内存溢出或模型网关拒绝。
+     */
     boolean canInlineMedia(String... paths) {
         long total = 0L;
         for (String raw : paths) {
@@ -443,6 +583,9 @@ public class AiAnalysisService {
         return true;
     }
 
+    /**
+     * 推算多媒体文件的 MimeType。
+     */
     private String mimeType(String path) {
         if (path == null) return "video/mp4";
         String lower = path.toLowerCase(Locale.ROOT);
@@ -454,6 +597,9 @@ public class AiAnalysisService {
         return "video/mp4";
     }
 
+    /**
+     * 解析模型返回的 Response Body。如果非标准 JSON，将其包裹在文本属性中。
+     */
     private JsonNode parseOrText(String body) {
         try {
             return mapper.readTree(body);
@@ -464,7 +610,11 @@ public class AiAnalysisService {
         }
     }
 
+    /**
+     * 针对不同厂商响应协议结构，提取具体的文本答案。
+     */
     private String extractAnswer(JsonNode body, boolean nativeVlm, boolean gemini) {
+        // 1. Google Gemini 响应结构解析
         if (gemini) {
             StringBuilder text = new StringBuilder();
             JsonNode parts = body.path("candidates").path(0).path("content").path("parts");
@@ -476,34 +626,57 @@ public class AiAnalysisService {
             }
             return text.toString();
         }
+        
+        // 2. MiniMax 原生 VLM 响应结构解析
         if (nativeVlm && body.has("content")) {
             JsonNode content = body.path("content");
             if (content.isTextual()) return content.asText("");
             if (content.isObject() || content.isArray()) return content.toString();
         }
+        
+        // 3. OpenAI 兼容协议响应结构解析
         JsonNode choices = body.path("choices");
         if (choices.isArray() && !choices.isEmpty()) return choices.get(0).path("message").path("content").asText("");
+        
+        // 保底解析
         return body.path("output").path("text").asText(body.path("result").asText(""));
     }
 
+    /**
+     * 关键结果解析器。
+     * <p>由于大模型可能在输出中附带 ```json ... ``` 的 Markdown 标记，或者在生成中夹带
+     * 思考过程标签（如 DeepSeek R1 产出的 {@code <think>...</think>}），
+     * 该方法使用正则表达式对这些非 JSON 字符进行清理，确保能够百分百成功进行 JSON 反序列化。
+     * 解析后，还会对其各评分维度（dimension_scores）和字段进行补正和归一化处理，防止数据库缺失关键列。</p>
+     */
     private JsonNode parseJsonResult(String answer) throws Exception {
         String text = answer == null ? "" : answer.trim();
+        // 移除 R1 等模型的思维链标签
         text = text.replaceAll("(?i)<think>[\\s\\S]*?</think>", "").trim();
+        
+        // 提取 Markdown 代码块内部的 JSON 字符串
         Matcher fencedMatcher = Pattern.compile("```(?:json)?\\s*([\\s\\S]*?)\\s*```", Pattern.CASE_INSENSITIVE).matcher(text);
         if (fencedMatcher.find()) text = fencedMatcher.group(1).trim();
+        
+        // 如果清洗后仍不以左花括号开头，尝试正则提取第一个完整的花括号对象
         if (!text.startsWith("{")) {
             Matcher objectMatcher = Pattern.compile("\\{[\\s\\S]*}").matcher(text);
             if (objectMatcher.find()) text = objectMatcher.group();
         }
+        
         JsonNode raw;
         try {
             raw = mapper.readTree(text);
         } catch (Exception e) {
+            // 对末尾可能多出的半角逗号进行兜底清除
             raw = mapper.readTree(text.replaceAll(",\\s*([}\\]])", "$1"));
         }
+        
         if (raw == null || raw.isMissingNode() || !raw.isObject()) throw new IllegalArgumentException("API returned a non-object JSON result: " + truncate(text, 300));
         ObjectNode normalized = ((ObjectNode) raw).deepCopy();
         JsonNode d = raw.path("dimension_scores");
+        
+        // 归一化并提取所有支持的评分维度字段，提供同义词映射以适应多模型输出偏差
         ObjectNode dims = mapper.createObjectNode();
         dims.put("indoor_layout", number(d, "indoor_layout", "室内布局", "空间布局", "architecture", "建筑风格"));
         dims.put("wall_floor_material", number(d, "wall_floor_material", "墙地材质", "road_surface", "地面材质"));
@@ -511,6 +684,8 @@ public class AiAnalysisService {
         dims.put("window_door_style", number(d, "window_door_style", "门窗样式", "vegetation", "植被绿化"));
         dims.put("lighting_environment", number(d, "lighting_environment", "光照环境", "lighting_weather", "光照天气", "天气光线"));
         normalized.set("dimension_scores", dims);
+        
+        // 确保基本比对结构字段缺省存在
         if (!normalized.has("similar_points")) normalized.set("similar_points", mapper.createArrayNode());
         if (!normalized.has("difference_points")) normalized.set("difference_points", mapper.createArrayNode());
         if (!normalized.has("summary")) normalized.put("summary", "");
@@ -518,6 +693,9 @@ public class AiAnalysisService {
         return normalized;
     }
 
+    /**
+     * 辅助数值提取器：查找多个可能的字段名，安全解析为 0 - 100 范围的整数。
+     */
     private int number(JsonNode node, String... keys) {
         for (String key : keys) {
             JsonNode value = node.path(key);
@@ -532,20 +710,35 @@ public class AiAnalysisService {
         return 0;
     }
 
+    /**
+     * 提取或估算本次大模型推理所耗用的 Token 额度。
+     * 若响应体中含有官方统计节点则直接取用；若没有，根据输入提示词长度、抽帧张数及返回文本长度进行保底公式估算。
+     */
     private JsonNode extractUsage(JsonNode body, String prompt, String answer, int imageCount, String modelId,
                                   String recognitionMode, String videoAPath, String videoBPath) {
         JsonNode usage = body.path("usage");
         ObjectNode out = mapper.createObjectNode();
         int promptTokens = usage.path("prompt_tokens").asInt(usage.path("input_tokens").asInt(0));
         int completionTokens = usage.path("completion_tokens").asInt(usage.path("output_tokens").asInt(0));
+        
+        // 提取 Gemini 的 usage 节点
         if (promptTokens <= 0) promptTokens = body.path("usageMetadata").path("promptTokenCount").asInt(0);
         if (completionTokens <= 0) completionTokens = body.path("usageMetadata").path("candidatesTokenCount").asInt(0);
+        
+        // 保底手动估算 Token
         if (promptTokens <= 0) {
             boolean qwenVideo = "video".equalsIgnoreCase(recognitionMode) && modelId != null && modelId.toLowerCase(Locale.ROOT).contains("qwen");
-            if (qwenVideo) promptTokens = qwenVideoTokens(videoAPath) + qwenVideoTokens(videoBPath) + prompt.length() / 2 + 150;
-            else promptTokens = Math.max(1, prompt.length() / 2 + imageCount * 300);
+            if (qwenVideo) {
+                // 如果是通义千问视频识别模式，执行官方视频多模态 Token 计算公式
+                promptTokens = qwenVideoTokens(videoAPath) + qwenVideoTokens(videoBPath) + prompt.length() / 2 + 150;
+            } else {
+                // 图片模式估算：字符数/2 + 抽帧数 * 300 Token (单张多模态图的标准底耗)
+                promptTokens = Math.max(1, prompt.length() / 2 + imageCount * 300);
+            }
         }
-        if (completionTokens <= 0) completionTokens = Math.max(1, (answer == null ? 0 : answer.length()) / 2);
+        if (completionTokens <= 0) {
+            completionTokens = Math.max(1, (answer == null ? 0 : answer.length()) / 2);
+        }
         out.put("prompt_tokens", promptTokens);
         out.put("completion_tokens", completionTokens);
         out.put("total_tokens", promptTokens + completionTokens);
@@ -553,6 +746,9 @@ public class AiAnalysisService {
         return out;
     }
 
+    /**
+     * 估算 Token 备用工具方法。
+     */
     private JsonNode usageEstimate(String prompt, int imageCount, int answerLen) {
         ObjectNode out = mapper.createObjectNode();
         int promptTokens = Math.max(1, prompt.length() / 2 + imageCount * 300);
@@ -564,12 +760,18 @@ public class AiAnalysisService {
         return out;
     }
 
+    /**
+     * 判断是否是 Google Gemini 系列模型。
+     */
     private boolean isGemini(String provider, String modelId) {
         String providerValue = provider == null ? "" : provider.toLowerCase(Locale.ROOT);
         String modelValue = modelId == null ? "" : modelId.toLowerCase(Locale.ROOT);
         return providerValue.contains("google") || modelValue.contains("gemini");
     }
 
+    /**
+     * 补全拼接 Gemini GenerateContent 接口所需要的带 key 查询参数的 URL 地址。
+     */
     private String geminiGenerateContentUrl(String baseUrl, String modelId, String apiKey) {
         String base = (baseUrl == null || baseUrl.isBlank()) ? "https://generativelanguage.googleapis.com/v1beta" : baseUrl.replaceAll("/+$", "");
         if (base.contains(":generateContent")) return base.contains("?") ? base : base + "?key=" + apiKey;
@@ -577,6 +779,11 @@ public class AiAnalysisService {
         return base + "/" + modelPath + ":generateContent?key=" + apiKey;
     }
 
+    /**
+     * 阿里云通义千问 Qwen2-VL 视频内联 Token 核心计算公式逻辑。
+     * 底层调用 ffprobe 分析视频帧数，按高度和宽度向下取整对齐 QWEN_IMAGE_FACTOR 因子，
+     * 依据其算力白皮书中的数学模型计算总 Token 消耗量。
+     */
     private int qwenVideoTokens(String videoPath) {
         VideoProbe probe = probeVideo(videoPath);
         if (probe == null || probe.width() <= 0 || probe.height() <= 0 || probe.totalFrames() <= 0 || probe.fps() <= 0) return 0;
@@ -600,6 +807,9 @@ public class AiAnalysisService {
         return (int) (Math.ceil(nframes / 2.0) * (hBar / 32.0) * (wBar / 32.0)) + 2;
     }
 
+    /**
+     * 计算 Qwen2-VL 的有效提取视频帧数。
+     */
     private int smartNframes(double fpsParam, int totalFrames, double videoFps) {
         double fps = fpsParam > 0 ? fpsParam : QWEN_FPS;
         int minFrames = ceilByFactor(QWEN_FPS_MIN_FRAMES, QWEN_FRAME_FACTOR);
@@ -621,6 +831,9 @@ public class AiAnalysisService {
         return (int) Math.floor(number / factor) * factor;
     }
 
+    /**
+     * 专门用于 Qwen Token 计算的 FFprobe 视频轨快速探测工具。
+     */
     private VideoProbe probeVideo(String videoPath) {
         if (videoPath == null || videoPath.isBlank() || !Files.exists(resolvePath(videoPath))) return null;
         try {
@@ -653,6 +866,9 @@ public class AiAnalysisService {
         }
     }
 
+    /**
+     * 解析分数类型帧率。
+     */
     private double parseFps(String raw) {
         try {
             if (raw.contains("/")) {
@@ -667,6 +883,9 @@ public class AiAnalysisService {
         }
     }
 
+    /**
+     * 生成模型调用异常时的默认兜底错误响应 JSON 结构。
+     */
     private JsonNode errorResult(String message) {
         ObjectNode result = mapper.createObjectNode();
         result.put("similarity_score", 0);
@@ -682,6 +901,9 @@ public class AiAnalysisService {
         return result;
     }
 
+    /**
+     * 新建模型请求调用审计记录并持久化（对发送 Payload 进行深拷贝脱敏处理）。
+     */
     private ModelCallLog startLog(String taskId, String taskName, String modelId, String modelUrl,
                                   JsonNode requestPayload, LocalDateTime startedAt) {
         try {
@@ -702,8 +924,11 @@ public class AiAnalysisService {
         }
     }
 
+    /**
+     * 更新模型接口最终响应审计记录。
+     */
     private void finishLog(ModelCallLog log, JsonNode responseBody, LocalDateTime endedAt, int statusCode,
-                           double inputTokens, double outputTokens) {
+                            double inputTokens, double outputTokens) {
         if (log == null) return;
         try {
             log.setResponseBody(sanitizeForLog(responseBody));
@@ -717,6 +942,9 @@ public class AiAnalysisService {
         }
     }
 
+    /**
+     * 解析本地媒体文件的 Path 路径。
+     */
     private Path resolvePath(String raw) {
         if (raw == null || raw.isBlank()) return Path.of("");
         Path path = Path.of(raw);
@@ -731,16 +959,24 @@ public class AiAnalysisService {
         return path;
     }
 
+    /**
+     * 截取字符串的最大长度，用于日志截断。
+     */
     private String truncate(String text, int max) {
         if (text == null) return "";
         return text.length() <= max ? text : text.substring(0, max);
     }
 
+    /**
+     * 基于深拷贝清理审计数据，避免脱敏过程修改实际发送给模型的请求载荷。
+     */
     JsonNode sanitizeForLog(JsonNode source) {
-        // 基于深拷贝清理审计数据，避免脱敏过程修改实际发送给模型的请求载荷。
         return sanitizeForLog(source, null);
     }
 
+    /**
+     * 内部深拷贝递归清理 JSON 属性，如果检测到值是 Base64 媒体数据流，替换为 redacted 占位符。
+     */
     private JsonNode sanitizeForLog(JsonNode source, String parentMimeType) {
         if (source == null || source.isNull()) return source;
         if (source.isObject()) {
@@ -759,6 +995,9 @@ public class AiAnalysisService {
         return source.deepCopy();
     }
 
+    /**
+     * 判断字段属性是否需要脱敏。
+     */
     private JsonNode sanitizeField(String key, JsonNode value, String mimeType) {
         if (value.isTextual() && "data".equals(key) && mimeType != null && mimeType.startsWith("video/")) {
             return mapper.getNodeFactory().textNode(redactedMarker("video", value.asText()));
@@ -766,6 +1005,9 @@ public class AiAnalysisService {
         return sanitizeForLog(value, mimeType);
     }
 
+    /**
+     * 依据字符串特征检测并对超长 Base64 或者是 video base64 媒体段进行占位脱敏。
+     */
     private JsonNode sanitizedText(String value, String mimeType) {
         if (value.startsWith("data:video/")) return mapper.getNodeFactory().textNode(redactedMarker("video", value));
         if (mimeType != null && mimeType.startsWith("video/")) {
@@ -777,6 +1019,9 @@ public class AiAnalysisService {
         return mapper.getNodeFactory().textNode(value);
     }
 
+    /**
+     * 正则粗筛判断一个字符串是否大概率是 Base64 编码。
+     */
     private boolean looksLikeBase64(String value) {
         String candidate = value;
         int comma = value.indexOf(',');
@@ -786,18 +1031,26 @@ public class AiAnalysisService {
         return candidate.substring(0, sampleLength).matches("[A-Za-z0-9+/=\\r\\n]+");
     }
 
+    /**
+     * 脱敏记录的替换内容说明标记。
+     */
     private String redactedMarker(String type, String value) {
         return "[redacted " + type + " payload, encoded_chars=" + value.length() + "]";
     }
 
+    /**
+     * 对请求 URL 中的 key= 敏感参数进行隐藏。
+     */
     private String redactUrl(String url) {
         if (url == null) return null;
         return url.replaceAll("([?&]key=)[^&]+", "$1[redacted]");
     }
 
+    /** 视频物理属性探测结果 record */
     private record VideoProbe(int width, int height, int totalFrames, double fps) {
     }
 
+    /** 模型 Payload 和内联标识 record */
     private record PayloadEnvelope(ObjectNode payload, boolean inlineVideo) {
     }
 }

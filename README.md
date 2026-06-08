@@ -49,7 +49,7 @@ EnvMatch 提供两种核心识别模式，以适配不同的业务场景与模�
 
 *   **前端**：React 19 + TypeScript 6 + Vite 8 + Tailwind CSS 4 + ECharts + dnd-kit
 *   **后端**：Java 17 + Spring Boot 3.3 + MyBatis-Plus + PostgreSQL
-*   **多媒体处理**：FFmpeg / FFprobe + Java ImageIO
+*   **多媒体处理**：JavaCV (FFmpeg & OpenCV bindings) + Java ImageIO
 *   **AI 引擎**：Google Gemini API、OpenAI 兼容多模态接口及 MiniMax 原生 VLM 接口
 
 ## 📦 快速启动
@@ -58,7 +58,7 @@ EnvMatch 提供两种核心识别模式，以适配不同的业务场景与模�
 *   JDK 17+
 *   Maven 3.9+
 *   Node.js 18+
-*   **FFmpeg** (必须安装并添加至系统 PATH)
+*   **FFmpeg/FFprobe** (建议安装并添加至系统 PATH，主要用于 Token 估算等辅助探测功能)
 
 ### 2. 后端启动
 ```bash

@@ -1,0 +1,10 @@
+2026-06-08 10:28:06.001 CST [11020] 日志:  正在启动 PostgreSQL 16.0, compiled by Visual C++ build 1935, 64-bit
+2026-06-08 10:28:06.004 CST [11020] 日志:  正在监听IPv6地址"::1"，端口 5432
+2026-06-08 10:28:06.005 CST [11020] 日志:  正在监听IPv4地址"127.0.0.1"，端口 5432
+2026-06-08 10:28:06.037 CST [17380] 日志:  数据库系统中断；上一次的启动时间是在2026-06-08 10:27:28 CST
+2026-06-08 10:28:06.173 CST [17380] 日志:  数据库系统没有正确的关闭; 处于自动恢复状态中
+2026-06-08 10:28:06.176 CST [17380] 日志:  invalid record length at 0/31E3970: expected at least 24, got 0
+2026-06-08 10:28:06.176 CST [17380] 日志:  不需要 redo
+2026-06-08 10:28:06.181 CST [6192] 日志:  checkpoint starting: end-of-recovery immediate wait
+2026-06-08 10:28:06.196 CST [6192] 日志:  checkpoint complete: wrote 3 buffers (0.0%); 0 WAL file(s) added, 0 removed, 0 recycled; write=0.002 s, sync=0.004 s, total=0.019 s; sync files=2, longest=0.003 s, average=0.002 s; distance=0 kB, estimate=0 kB; lsn=0/31E3970, redo lsn=0/31E3970
+2026-06-08 10:28:06.208 CST [11020] 日志:  数据库系统准备接受连接

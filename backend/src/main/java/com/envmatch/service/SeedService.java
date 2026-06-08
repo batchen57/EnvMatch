@@ -10,18 +10,42 @@ import org.springframework.stereotype.Service;
 
 import java.util.List;
 
+/**
+ * 数据库基础种子数据初始化服务。
+ * 
+ * <p>负责在系统运行期间（如访问模型列表或提示词模板列表时）进行防空检测。
+ * 如果发现对应数据库表为空，则会自动注入默认的 AI 模型配置（包括 Gemini 2.5 Pro、GPT-4o、MiniMax-M2.7 等）
+ * 以及系统内置的提示词模板（如系统默认通用提示词、反欺诈中介环境对比专用提示词），以保障平台的开箱即用能力。</p>
+ */
 @Service
 public class SeedService {
+    
+    /** AI模型配置映射接口 */
     private final AIModelMapper modelMapper;
+    
+    /** 提示词模板映射接口 */
     private final PromptTemplateMapper promptMapper;
+    
+    /** Jackson 对象转换器 */
     private final ObjectMapper mapper;
 
+    /**
+     * 构造函数，由 Spring 容器自动注入依赖。
+     *
+     * @param modelMapper  模型 Mapper
+     * @param promptMapper 模板 Mapper
+     * @param mapper       ObjectMapper
+     */
     public SeedService(AIModelMapper modelMapper, PromptTemplateMapper promptMapper, ObjectMapper mapper) {
         this.modelMapper = modelMapper;
         this.promptMapper = promptMapper;
         this.mapper = mapper;
     }
 
+    /**
+     * 检测并确保模型表（ai_models）中含有基本种子数据。
+     * 如果表为空，则预置注入 Google Gemini、OpenAI GPT-4o、Alibaba 通义千问以及 MiniMax 多模态模型配置。
+     */
     public void ensureModels() {
         if (modelMapper.selectCount(null) > 0) return;
         addModel("Gemini 2.5 Pro", "gemini-2.5-pro", "Google", "", "",
@@ -36,6 +60,10 @@ public class SeedService {
                 "通义千问视觉模型，支持图片与视频帧理解。", List.of("text", "image", "video"), "false", 40);
     }
 
+    /**
+     * 检测并确保提示词模板表（prompt_templates）中含有内置种子数据。
+     * 如果表为空，则预置创建“系统默认通用提示词”和“反欺诈中介环境对比专用提示词”。
+     */
     public void ensurePrompts() {
         if (promptMapper.selectCount(null) > 0) return;
 
@@ -77,6 +105,19 @@ public class SeedService {
         promptMapper.insert(antifraudTemplate);
     }
 
+    /**
+     * 辅助方法：向数据库持久化添加一个新模型配置。
+     *
+     * @param name         模型名称
+     * @param identifier   模型标识符
+     * @param provider     模型供应商
+     * @param key          API Key
+     * @param url          API 调用端点 Base URL
+     * @param description  模型描述
+     * @param capabilities 支持的能力列表
+     * @param isDefault    是否默认
+     * @param sortOrder    排序权重
+     */
     private void addModel(String name, String identifier, String provider, String key, String url,
                           String description, List<String> capabilities, String isDefault, double sortOrder) {
         AIModel model = new AIModel();

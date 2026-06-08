@@ -1,11 +1,12 @@
 package com.envmatch.service;
 
-import nu.pattern.OpenCV;
 import org.junit.jupiter.api.Test;
-import org.opencv.core.CvType;
-import org.opencv.core.Mat;
-import org.opencv.core.Scalar;
-import org.opencv.imgproc.Imgproc;
+import org.bytedeco.javacpp.Loader;
+import org.bytedeco.javacpp.opencv_core.Mat;
+import org.bytedeco.javacpp.opencv_core.Scalar;
+
+import static org.bytedeco.javacpp.opencv_core.*;
+import static org.bytedeco.javacpp.opencv_imgproc.*;
 
 import java.util.stream.IntStream;
 import java.util.List;
@@ -34,13 +35,13 @@ class VideoServicePerceptualTest {
 
     @Test
     void sceneContentScoreDetectsAbruptVisualChange() {
-        OpenCV.loadLocally();
-        Mat black = new Mat(36, 64, CvType.CV_8UC3, new Scalar(0, 0, 0));
-        Mat red = new Mat(36, 64, CvType.CV_8UC3, new Scalar(0, 0, 255));
+        Loader.load(org.bytedeco.javacpp.opencv_core.class);
+        Mat black = new Mat(36, 64, CV_8UC3, new Scalar(0.0, 0.0, 0.0, 0.0));
+        Mat red = new Mat(36, 64, CV_8UC3, new Scalar(0.0, 0.0, 255.0, 0.0));
         Mat blackHsv = new Mat();
         Mat redHsv = new Mat();
-        Imgproc.cvtColor(black, blackHsv, Imgproc.COLOR_BGR2HSV);
-        Imgproc.cvtColor(red, redHsv, Imgproc.COLOR_BGR2HSV);
+        cvtColor(black, blackHsv, COLOR_BGR2HSV);
+        cvtColor(red, redHsv, COLOR_BGR2HSV);
 
         double unchanged = VideoService.contentScore(blackHsv, blackHsv);
         double changed = VideoService.contentScore(blackHsv, redHsv);

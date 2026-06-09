@@ -53,4 +53,40 @@ class VideoServicePerceptualTest {
         assertThat(unchanged).isZero();
         assertThat(changed).isGreaterThan(15.0);
     }
+
+    @Test
+    void testActualVideosPerceptualSampling() throws Exception {
+        com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+        VideoService videoService = new VideoService("target/test-storage", mapper);
+        
+        String[] videoFiles = {"A.mp4", "B.mp4", "C.mp4", "D.mp4", "E.mp4"};
+        
+        System.out.println("==================== PERCEPTUAL SAMPLING TEST RESULTS ====================");
+        for (String file : videoFiles) {
+            java.nio.file.Path videoPath = java.nio.file.Path.of("..", file);
+            if (!java.nio.file.Files.exists(videoPath)) {
+                System.out.println("File not found: " + videoPath.toAbsolutePath());
+                continue;
+            }
+            
+            VideoMetadata meta = videoService.metadata(videoPath.toString());
+            System.out.printf("Video: %s | Duration: %.2fs | Resolution: %s | FPS: %.2f%n", 
+                file, meta.duration(), meta.resolution(), meta.fps());
+            
+            // 1. Default task range (0s to 15s)
+            List<String> framesDefault = videoService.extractFrames(
+                videoPath.toString(), 
+                "test-" + file.replace(".", "-"), 
+                "default", 
+                1, 
+                720, 
+                "perceptual", 
+                0.0, 
+                15.0
+            );
+            System.out.printf("  - Default interval [0s, 15s] perceptual frame count: %d%n", framesDefault.size());
+        }
+        System.out.println("=========================================================================");
+    }
 }
+

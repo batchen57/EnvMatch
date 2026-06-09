@@ -10,8 +10,8 @@ EnvMatch AI 是一个视频/图片环境相似度对比平台。用户上传 A/B
 
 - **Backend**: Java 17, Spring Boot 3.3.5, Spring MVC, MyBatis-Plus 3.5.7, PostgreSQL
 - **Frontend**: React 19, TypeScript 6, Vite 8, Tailwind CSS 4, ECharts, React Router 7, Framer Motion, Radix UI, dnd-kit
-- **AI**: Google Gemini API, OpenAI-compatible multimodal APIs, MiniMax native VLM endpoint
-- **Media**: JavaCV (FFmpeg & OpenCV bindings), FFmpeg/FFprobe CLI (for fallback token estimation), Java ImageIO/Graphics2D
+- **AI**: Google Gemini API, OpenAI-compatible multimodal APIs, MiniMax native VLM & OpenAI-compatible VLM endpoints (including MiniMax-M3)
+- **Media**: JavaCV (FFmpeg & OpenCV bindings), Java ImageIO/Graphics2D
 - **Tests**: JUnit 5, Spring Boot Test, AssertJ, Mockito
 
 ## Project Structure

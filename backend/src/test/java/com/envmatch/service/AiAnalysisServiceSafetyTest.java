@@ -150,7 +150,7 @@ class AiAnalysisServiceSafetyTest {
         method.setAccessible(true);
         Object envelope = method.invoke(
                 service,
-                List.of(frameA.toString()), List.of(frameB.toString()), "compare", "MiniMax-M3",
+                List.of(frameA.toString()), List.of(frameB.toString()), "compare", "MiniMax-M2.7",
                 "MiniMax", "image", false, false, "", ""
         );
         Method payloadAccessor = envelope.getClass().getDeclaredMethod("payload");
@@ -163,6 +163,71 @@ class AiAnalysisServiceSafetyTest {
         assertThat(message.path("images")).hasSize(1);
         assertThat(message.path("images").get(0).asText()).isNotEmpty();
         assertThat(message.path("images").get(0).asText()).doesNotStartWith("data:image");
+    }
+
+    @Test
+    void minimaxM3VideoPayloadUsesOpenAiFormat() throws Exception {
+        Path frameA = imageFile(160, 90, Color.RED);
+        Path frameB = imageFile(160, 90, Color.BLUE);
+        Method method = AiAnalysisService.class.getDeclaredMethod(
+                "buildPayload",
+                List.class, List.class, String.class, String.class, String.class, String.class,
+                boolean.class, boolean.class, String.class, String.class
+        );
+        method.setAccessible(true);
+        Object envelope = method.invoke(
+                service,
+                List.of(frameA.toString()), List.of(frameB.toString()), "compare", "MiniMax-M3",
+                "MiniMax", "video", false, false, "", ""
+        );
+        Method payloadAccessor = envelope.getClass().getDeclaredMethod("payload");
+        payloadAccessor.setAccessible(true);
+        JsonNode payload = (JsonNode) payloadAccessor.invoke(envelope);
+
+        JsonNode content = payload.path("messages").path(0).path("content");
+        assertThat(content).hasSize(3); // 1 text + 1 image from A + 1 image from B
+        assertThat(content.path(0).path("type").asText()).isEqualTo("text");
+        assertThat(content.path(1).path("type").asText()).isEqualTo("image_url");
+        assertThat(content.path(2).path("type").asText()).isEqualTo("image_url");
+    }
+
+    @Test
+    void minimaxM3VideoPayloadUsesInlineVideo() throws Exception {
+        Path videoA = Files.createTempFile("envmatch-inline-a-", ".mp4");
+        Path videoB = Files.createTempFile("envmatch-inline-b-", ".mp4");
+        Files.write(videoA, new byte[100]);
+        Files.write(videoB, new byte[100]);
+
+        Method method = AiAnalysisService.class.getDeclaredMethod(
+                "buildPayload",
+                List.class, List.class, String.class, String.class, String.class, String.class,
+                boolean.class, boolean.class, String.class, String.class
+        );
+        method.setAccessible(true);
+        Object envelope = method.invoke(
+                service,
+                List.of(), List.of(), "compare", "MiniMax-M3",
+                "MiniMax", "video", false, false, videoA.toString(), videoB.toString()
+        );
+        Method payloadAccessor = envelope.getClass().getDeclaredMethod("payload");
+        payloadAccessor.setAccessible(true);
+        JsonNode payload = (JsonNode) payloadAccessor.invoke(envelope);
+
+        JsonNode content = payload.path("messages").path(0).path("content");
+        assertThat(content).hasSize(3); // 1 video A + 1 video B + 1 text prompt
+        
+        assertThat(content.path(0).path("type").asText()).isEqualTo("video_url");
+        assertThat(content.path(0).path("video_url").path("url").asText()).startsWith("data:video/mp4;base64,");
+        assertThat(content.path(0).path("video_url").path("fps").asDouble()).isEqualTo(1.0);
+        
+        assertThat(content.path(1).path("type").asText()).isEqualTo("video_url");
+        assertThat(content.path(1).path("video_url").path("url").asText()).startsWith("data:video/mp4;base64,");
+        assertThat(content.path(1).path("video_url").path("fps").asDouble()).isEqualTo(1.0);
+        
+        assertThat(content.path(2).path("type").asText()).isEqualTo("text");
+
+        Files.deleteIfExists(videoA);
+        Files.deleteIfExists(videoB);
     }
 
     private BufferedImage decode(String encoded) throws Exception {

@@ -658,7 +658,7 @@ public class VideoService {
         
         FloatIndexer prevIdx = previous.createIndexer();
         FloatIndexer currIdx = current.createIndexer();
-        ByteIndexer statusIdx = status.createIndexer();
+        org.bytedeco.javacpp.indexer.UByteIndexer statusIdx = status.createIndexer();
         
         try {
             int validCount = 0;

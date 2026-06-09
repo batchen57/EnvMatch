@@ -299,7 +299,8 @@ public class AiAnalysisService {
         user.put("role", "user");
 
         // 阿里大模型兼容格式
-        boolean isMiniMax = "MiniMax".equalsIgnoreCase(provider) || (modelId != null && modelId.toLowerCase(Locale.ROOT).contains("minimax"));
+        boolean isMiniMax = ("MiniMax".equalsIgnoreCase(provider) || (modelId != null && modelId.toLowerCase(Locale.ROOT).contains("minimax")))
+                && (modelId == null || !modelId.toLowerCase(Locale.ROOT).contains("-m3"));
         if (isMiniMax) {
             user.put("content", imageComparisonPrompt(prompt));
             ArrayNode images = user.putArray("images");
@@ -308,11 +309,12 @@ public class AiAnalysisService {
         }
 
         ArrayNode content = user.putArray("content");
-        boolean qwenVideo = "video".equalsIgnoreCase(recognitionMode) && modelId.toLowerCase(Locale.ROOT).contains("qwen");
-        if (qwenVideo && inlineVideo) {
-            // Qwen 视频模式：内联素材原视频
-            addVideo(content, videoAPath);
-            addVideo(content, videoBPath);
+        boolean openAiVideo = "video".equalsIgnoreCase(recognitionMode)
+                && (modelId.toLowerCase(Locale.ROOT).contains("qwen") || modelId.toLowerCase(Locale.ROOT).contains("minimax"));
+        if (openAiVideo && inlineVideo) {
+            // OpenAI 兼容视频模式：内联素材原视频
+            addVideo(content, videoAPath, modelId);
+            addVideo(content, videoBPath, modelId);
             content.addObject().put("type", "text").put("text", prompt);
         } else if ("video".equalsIgnoreCase(recognitionMode)) {
             // 超出大小限制降级为多张采样帧形式发送
@@ -325,7 +327,7 @@ public class AiAnalysisService {
             addBase64Image(content, frameGridBase64(framesA, "A"));
             addBase64Image(content, frameGridBase64(framesB, "B"));
         }
-        return new PayloadEnvelope(payload, qwenVideo && inlineVideo);
+        return new PayloadEnvelope(payload, openAiVideo && inlineVideo);
     }
 
     /**
@@ -372,15 +374,22 @@ public class AiAnalysisService {
     }
 
     /**
-     * 添加内联视频到请求 Payload (OpenAI 格式，例如通义千问)
+     * 添加内联视频到请求 Payload (OpenAI 格式，例如通义千问, MiniMax-M3)
      */
-    private void addVideo(ArrayNode content, String path) throws Exception {
+    private void addVideo(ArrayNode content, String path, String modelId) throws Exception {
         Path resolved = resolvePath(path);
-        if (path == null || path.isBlank() || !Files.exists(resolved)) throw new IllegalStateException("Qwen video mode requires readable video files");
+        if (path == null || path.isBlank() || !Files.exists(resolved)) throw new IllegalStateException("Video mode requires readable video files");
         ObjectNode video = content.addObject();
         video.put("type", "video_url");
-        video.putObject("video_url").put("url", "data:" + mimeType(path) + ";base64," + fileBase64(path));
-        video.put("fps", 2);
+        ObjectNode videoUrl = video.putObject("video_url");
+        videoUrl.put("url", "data:" + mimeType(path) + ";base64," + fileBase64(path));
+        
+        boolean isMiniMax = modelId != null && modelId.toLowerCase(Locale.ROOT).contains("minimax");
+        if (isMiniMax) {
+            videoUrl.put("fps", 1.0); // MiniMax-M3 视频 fps 参数放在 video_url 内部
+        } else {
+            video.put("fps", 2);      // Qwen-VL 视频 fps 参数放在 content 根节点上
+        }
     }
 
     /**

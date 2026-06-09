@@ -680,7 +680,7 @@ export function ModelLogs() {
                     <img 
                       src={imageView.images[focusedImgIdx]} 
                       alt="Focused Preview" 
-                      className="shadow-[0_0_50px_rgba(0,0,0,0.5)] rounded-lg border border-white/10 pointer-events-none select-none"
+                      className="max-w-[90%] max-h-[90%] object-contain shadow-[0_0_50px_rgba(0,0,0,0.5)] rounded-lg border border-white/10 pointer-events-none select-none"
                     />
                   </motion.div>
                 </motion.div>

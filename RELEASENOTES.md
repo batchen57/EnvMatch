@@ -1,5 +1,29 @@
 # EnvMatch 版本迭代日志 (Release Notes)
 
+## [v1.8.0] - 2026-06-09
+
+### 🤖 MiniMax-M3 多模态模型与原生视频链路适配
+- **OpenAI 兼容协议对接**：针对 MiniMax 发布的最新 **MiniMax-M3** 大模型，在 AI 分析链路中自动跳过旧款 M2.7 的自定义 `images` 数组包格式，平滑对接 OpenAI 标准的多模态 `messages` 载荷契约。
+- **内联视频参数适配**：在 Native Video 识别模式下，支持将 MiniMax-M3 视频 `fps` 参数精准注入至 `video_url` 对象内层（`videoUrl.put("fps", 1.0)`），而非像通义千问（Qwen）模型那样放置在 content 的根节点上，实现多模型视频推理的精确兼容。
+
+### 📊 MyBatis-Plus 数据层查询优化与类型安全
+- **MyBatis-Plus 最佳实践重构**：将 `TaskMapper` 接口中的原始 `@Select` SQL 标注重构为基于 `LambdaQueryWrapper` 的 Java 默认方法实现。
+- **消弥 SQL 兼容隐患**：解决了针对不同底层数据库（如 PostgreSQL 与 SQLite）在分页查询、限制条数以及 `status` 字段类型（Enum 对应 string）隐式转换时的 SQL 执行异常风险，使持久层代码更稳健、更具类型安全性。
+
+### ⚙️ JavaCV 稀疏光流无符号字节指针对齐 (Lucas-Kanade Alignment)
+- **索引指针对齐**：修复了感知抽帧特征跟踪计算中的潜在类型异常。将 Lucas-Kanade 稀疏光流计算中的状态矩阵索引器从 `ByteIndexer` 升级为 `org.bytedeco.javacpp.indexer.UByteIndexer`（无符号 8 位整型）。
+- **像素跟踪保真**：完全对齐 OpenCV 物理 C++ Mat 的像素内存布局，避免由于 signed byte 符号位转换导致的特征点跟踪状态解析偏差。
+
+### 🎨 前端审计报文查看与图片展示优化
+- **预览图像比例修正**：优化了“模型调用记录”审计看板的全屏图片查看器（`ModelLogs.tsx`）。
+- **防溢出与自适应包裹**：将处于焦点状态的大图容器样式更新为 `max-w-[90%] max-h-[90%] object-contain`，修复了高分辨率抽帧图片在某些比例的浏览器视口中溢出或拉伸变形的 UI 缺陷。
+
+### 🧪 自动化测试与契约守护
+- **MiniMax-M3 单元测试**：在 `AiAnalysisServiceSafetyTest` 中新增 `minimaxM3VideoPayloadUsesOpenAiFormat` 与 `minimaxM3VideoPayloadUsesInlineVideo` 两个单元测试，全面覆盖 MiniMax-M3 图像/视频及内联 Payload 构建逻辑。
+- **感知抽帧真机测试**：在 `VideoServicePerceptualTest` 中引入了 `testActualVideosPerceptualSampling` 物理集成测试，利用本地 `A.mp4` 到 `E.mp4` 五个真实视频样本对 Lucas-Kanade 图像运动感知抽帧进行现场跑测与分析。
+
+---
+
 ## [v1.7.0] - 2026-06-08
 
 ### 🖼️ JavaCV 架构迁移与原生媒体渲染重构 (OpenCV to JavaCV Migration)

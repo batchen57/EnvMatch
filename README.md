@@ -4,7 +4,7 @@ EnvMatch 是一款基于多模态大模型的生产级视频环境分析平台�
 
 ## 🚀 核心功能
 
-*   **多模态对比分析**：支持 Gemini 2.0 Pro、GPT-4o、Qwen-VL-Max 及 **MiniMax-M2.7 (原生 VLM)** 等前沿模型。
+*   **多模态对比分析**：支持 Gemini 2.0 Pro、GPT-4o、Qwen-VL-Max、**MiniMax-M2.7 (原生 VLM)** 及 **MiniMax-M3 (OpenAI 兼容多模态)** 等前沿模型。
 *   **智能资产管理系统**：
     *   **模型配置中心**：支持拖拽排序 (DND) 与官方预设一键加载，灵活掌控 AI 路由优先级。
     *   **提示词模版库**：集成 Markdown 编辑器的提示词管理工具，支持快速搜索与精准指令分发。
@@ -50,7 +50,7 @@ EnvMatch 提供两种核心识别模式，以适配不同的业务场景与模�
 *   **前端**：React 19 + TypeScript 6 + Vite 8 + Tailwind CSS 4 + ECharts + dnd-kit
 *   **后端**：Java 17 + Spring Boot 3.3 + MyBatis-Plus + PostgreSQL
 *   **多媒体处理**：JavaCV (FFmpeg & OpenCV bindings) + Java ImageIO
-*   **AI 引擎**：Google Gemini API、OpenAI 兼容多模态接口及 MiniMax 原生 VLM 接口
+*   **AI 引擎**：Google Gemini API、OpenAI 兼容多模态接口及 MiniMax 原生 VLM/OpenAI 兼容接口
 
 ## 📦 快速启动
 
@@ -58,7 +58,7 @@ EnvMatch 提供两种核心识别模式，以适配不同的业务场景与模�
 *   JDK 17+
 *   Maven 3.9+
 *   Node.js 18+
-*   **FFmpeg/FFprobe** (建议安装并添加至系统 PATH，主要用于 Token 估算等辅助探测功能)
+*   **FFmpeg/FFprobe** (已集成于 JavaCV，部署环境无须单独安装或配置外部 CLI 依赖)
 
 ### 2. 后端启动
 ```bash
